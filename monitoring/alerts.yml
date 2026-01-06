@@ -1,0 +1,64 @@
+groups:
+  - name: infrastructure
+    rules:
+      - alert: HighCPU
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage: {{ $value }}%"
+
+      - alert: LowMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low memory: {{ $value }}% available"
+
+      - alert: HighDiskUsage
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk usage: {{ $value }}%"
+
+  - name: containers
+    rules:
+      - alert: ContainerDown
+        expr: absent(container_last_seen{name=~"datingbot-.*"}) or (time() - container_last_seen{name=~"datingbot-.*"}) > 60
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.name }} is down"
+
+  - name: application
+    rules:
+      - alert: APIDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API is down!"
+
+      - alert: HighTaskQueue
+        expr: redis_list_length{key="task_queue"} > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Task queue: {{ $value }} items"
+
+  - name: scaling
+    rules:
+      - alert: NeedMoreWorkers
+        expr: (100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 70) or ((node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 25)
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Consider adding more workers"
