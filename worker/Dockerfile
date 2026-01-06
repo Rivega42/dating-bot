@@ -2,16 +2,22 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install all Playwright dependencies manually (compatible with Debian trixie)
 RUN apt-get update && apt-get install -y \
-    wget curl gnupg libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+    wget curl gnupg \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
     libcups2 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 \
     libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 libatspi2.0-0 \
+    libx11-6 libx11-xcb1 libxcb1 libxext6 libxcursor1 libxi6 libxtst6 \
+    libglib2.0-0 libgtk-3-0 libpangocairo-1.0-0 libcairo-gobject2 libgdk-pixbuf-2.0-0 \
+    fonts-liberation fonts-noto-color-emoji fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN playwright install chromium && playwright install-deps chromium
+# Install only chromium browser, skip install-deps
+RUN playwright install chromium
 
 COPY . .
 
