@@ -39,7 +39,26 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6G
+          memory: 4G
+    depends_on:
+      - redis
+    networks:
+      - datingbot-network
+
+  auth-worker:
+    image: ghcr.io/${GITHUB_REPO}-worker:latest
+    build: ./worker
+    container_name: datingbot-auth-worker
+    restart: unless-stopped
+    command: python auth_worker.py
+    environment:
+      - DATABASE_URL=postgresql://${BEGET_DB_USER}:${BEGET_DB_PASSWORD}@${BEGET_DB_HOST}:5432/${BEGET_DB_NAME}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+    shm_size: '1gb'
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     depends_on:
       - redis
     networks:
