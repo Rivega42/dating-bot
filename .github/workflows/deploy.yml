@@ -57,11 +57,12 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd /home/datingbot/dating-bot
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f
-            sleep 10
+            sleep 15
             curl -f http://localhost:8000/health || exit 1
             echo "✅ Deploy successful!"
   notify:
