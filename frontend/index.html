@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dating Bot Platform</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            margin-bottom: 30px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        input {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        .btn-success {
+            background: #22c55e;
+            color: white;
+            margin-top: 10px;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tab.active {
+            border-color: #667eea;
+            background: #f0f4ff;
+            color: #667eea;
+            font-weight: 600;
+        }
+        .hidden {
+            display: none;
+        }
+        .dashboard {
+            display: none;
+        }
+        .account-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .account-info h3 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .account-info .status {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .status-active {
+            background: #dcfce7;
+            color: #16a34a;
+        }
+        .status-pending {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        .status-error {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 0.9rem;
+            border-radius: 8px;
+        }
+        .error {
+            color: #dc2626;
+            margin-top: 10px;
+        }
+        .success {
+            color: #16a34a;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Auth Card -->
+        <div class="card" id="authCard">
+            <h1>🚀 Dating Bot Platform</h1>
+            <p class="subtitle">Автоматизация знакомств на VK</p>
+            
+            <div class="tabs">
+                <div class="tab active" data-tab="login">Вход</div>
+                <div class="tab" data-tab="register">Регистрация</div>
+            </div>
+            
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="loginEmail" required placeholder="your@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Пароль</label>
+                    <input type="password" id="loginPassword" required placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-primary">Войти</button>
+                <div id="loginError" class="error"></div>
+            </form>
+            
+            <form id="registerForm" class="hidden">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="regEmail" required placeholder="your@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Пароль</label>
+                    <input type="password" id="regPassword" required placeholder="Минимум 8 символов">
+                </div>
+                <button type="submit" class="btn btn-primary">Зарегистрироваться</button>
+                <div id="regError" class="error"></div>
+            </form>
+        </div>
+        
+        <!-- Dashboard -->
+        <div class="card dashboard" id="dashboard">
+            <h1>📊 Панель управления</h1>
+            <p class="subtitle">Добро пожаловать, <span id="userEmail"></span></p>
+            
+            <h2 style="margin: 30px 0 20px">VK Аккаунты</h2>
+            <div id="accountsList"></div>
+            
+            <button class="btn btn-success" id="addAccountBtn">+ Добавить VK аккаунт</button>
+            <button class="btn btn-primary" id="logoutBtn" style="margin-top: 20px; background: #64748b;">Выйти</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin;
+        
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                const tabName = tab.dataset.tab;
+                document.getElementById('loginForm').classList.toggle('hidden', tabName !== 'login');
+                document.getElementById('registerForm').classList.toggle('hidden', tabName !== 'register');
+            });
+        });
+        
+        // Login
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    localStorage.setItem('token', data.access_token);
+                    showDashboard();
+                } else {
+                    document.getElementById('loginError').textContent = data.detail || 'Ошибка входа';
+                }
+            } catch (error) {
+                document.getElementById('loginError').textContent = 'Ошибка сети';
+            }
+        });
+        
+        // Register
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            
+            try {
+                const response = await fetch(`${API_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    localStorage.setItem('token', data.access_token);
+                    showDashboard();
+                } else {
+                    document.getElementById('regError').textContent = data.detail || 'Ошибка регистрации';
+                }
+            } catch (error) {
+                document.getElementById('regError').textContent = 'Ошибка сети';
+            }
+        });
+        
+        // Dashboard
+        async function showDashboard() {
+            const token = localStorage.getItem('token');
+            if (!token) return;
+            
+            try {
+                // Get user info
+                const userResponse = await fetch(`${API_URL}/auth/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (!userResponse.ok) {
+                    localStorage.removeItem('token');
+                    return;
+                }
+                
+                const user = await userResponse.json();
+                document.getElementById('userEmail').textContent = user.email;
+                
+                // Get accounts
+                await loadAccounts();
+                
+                // Show dashboard
+                document.getElementById('authCard').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                
+            } catch (error) {
+                console.error(error);
+            }
+        }
+        
+        async function loadAccounts() {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/vk-accounts`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            const accounts = await response.json();
+            const list = document.getElementById('accountsList');
+            
+            if (accounts.length === 0) {
+                list.innerHTML = '<p style="color: #666; text-align: center; padding: 30px;">Нет добавленных аккаунтов</p>';
+                return;
+            }
+            
+            list.innerHTML = accounts.map(acc => `
+                <div class="account-card">
+                    <div class="account-info">
+                        <h3>VK Аккаунт</h3>
+                        <div class="status">ID: ${acc.id.slice(0, 8)}...</div>
+                    </div>
+                    <div>
+                        <span class="status-badge status-${acc.status === 'active' ? 'active' : acc.status === 'pending_auth' ? 'pending' : 'error'}">
+                            ${acc.status === 'active' ? '✓ Активен' : acc.status === 'pending_auth' ? '⏳ Требует авторизации' : acc.status}
+                        </span>
+                        ${acc.status === 'pending_auth' ? `<button class="btn btn-small btn-primary" onclick="authorizeAccount('${acc.id}')">Авторизовать</button>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Add account
+        document.getElementById('addAccountBtn').addEventListener('click', async () => {
+            const token = localStorage.getItem('token');
+            
+            try {
+                const response = await fetch(`${API_URL}/vk-accounts`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ vk_app_id: '6121396' })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Start authorization
+                    authorizeAccount(data.id);
+                } else {
+                    alert('Ошибка: ' + (data.detail || 'Неизвестная ошибка'));
+                }
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        });
+        
+        // Authorize account
+        async function authorizeAccount(accountId) {
+            const token = localStorage.getItem('token');
+            
+            try {
+                const response = await fetch(`${API_URL}/auth-sessions`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ vk_account_id: accountId })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Open auth window
+                    window.open(`/auth.html?session=${data.session_id}`, 'vk_auth', 'width=1350,height=900');
+                } else {
+                    alert('Ошибка: ' + (data.detail || 'Неизвестная ошибка'));
+                }
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
+        
+        // Logout
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            localStorage.removeItem('token');
+            document.getElementById('authCard').style.display = 'block';
+            document.getElementById('dashboard').style.display = 'none';
+        });
+        
+        // Check auth on load
+        if (localStorage.getItem('token')) {
+            showDashboard();
+        }
+    </script>
+</body>
+</html>
