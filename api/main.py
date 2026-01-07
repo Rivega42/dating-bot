@@ -106,8 +106,15 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 class VKAccountCreate(BaseModel):
+    vk_app_id: str = "6121396"  # Default VK Dating app ID
+
+class VKAccountResponse(BaseModel):
+    id: str
     vk_app_id: str
-    session_data: dict
+    status: str
+    last_active_at: Optional[datetime]
+    error_message: Optional[str]
+    created_at: datetime
 
 class BotConfigCreate(BaseModel):
     active_quest: str
@@ -141,6 +148,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Import and include routers
+from routers import auth_sessions, websocket
+app.include_router(auth_sessions.router)
+app.include_router(websocket.router)
 
 
 @app.get("/health")
@@ -199,17 +212,42 @@ async def get_me(current_user = Depends(get_current_user)):
     )
 
 
-@app.post("/vk-accounts")
-async def create_vk_account(account: VKAccountCreate, current_user = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+@app.post("/vk-accounts", response_model=VKAccountResponse)
+async def create_vk_account(
+    account: VKAccountCreate,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create VK account record. After this, use /auth-sessions to authorize."""
     account_id = str(uuid.uuid4())
-    session_encrypted = json.dumps(account.session_data).encode()
     
     await db.execute(
-        text("INSERT INTO vk_accounts (id, client_id, vk_app_id, session_data_encrypted, status) VALUES (:id, :client_id, :vk_app_id, :session_data, 'inactive')"),
-        {"id": account_id, "client_id": str(current_user.id), "vk_app_id": account.vk_app_id, "session_data": session_encrypted}
+        text("""
+            INSERT INTO vk_accounts (id, client_id, vk_app_id, status) 
+            VALUES (:id, :client_id, :vk_app_id, 'pending_auth')
+        """),
+        {"id": account_id, "client_id": str(current_user.id), "vk_app_id": account.vk_app_id}
+    )
+    
+    # Create default bot config
+    config_id = str(uuid.uuid4())
+    await db.execute(
+        text("""
+            INSERT INTO bot_configs (id, vk_account_id, active_quest, quest_filters, boost_times)
+            VALUES (:id, :vk_account_id, 'ideal_date', '{}', ARRAY['19:00', '21:00', '23:00'])
+        """),
+        {"id": config_id, "vk_account_id": account_id}
     )
     await db.commit()
-    return {"id": account_id, "status": "created"}
+    
+    return VKAccountResponse(
+        id=account_id,
+        vk_app_id=account.vk_app_id,
+        status="pending_auth",
+        last_active_at=None,
+        error_message=None,
+        created_at=datetime.utcnow()
+    )
 
 
 @app.get("/vk-accounts")
@@ -224,11 +262,19 @@ async def list_vk_accounts(current_user = Depends(get_current_user), db: AsyncSe
 @app.post("/vk-accounts/{account_id}/start")
 async def start_bot(account_id: str, current_user = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        text("SELECT va.id FROM vk_accounts va JOIN bot_configs bc ON va.id = bc.vk_account_id WHERE va.id = :account_id AND va.client_id = :client_id"),
+        text("""
+            SELECT va.id, va.status FROM vk_accounts va 
+            JOIN bot_configs bc ON va.id = bc.vk_account_id 
+            WHERE va.id = :account_id AND va.client_id = :client_id
+        """),
         {"account_id": account_id, "client_id": str(current_user.id)}
     )
-    if not result.fetchone():
+    row = result.fetchone()
+    if not row:
         raise HTTPException(status_code=404, detail="Account or config not found")
+    
+    if row.status == "pending_auth":
+        raise HTTPException(status_code=400, detail="Account not authorized. Use /auth-sessions to authorize first.")
     
     redis_client = await get_redis()
     task = {"type": "start_session", "client_id": str(current_user.id), "vk_account_id": account_id, "timestamp": datetime.utcnow().isoformat()}
