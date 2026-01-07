@@ -21,13 +21,6 @@ console = Console()
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# VK Dating App IDs для исследования
-VK_DATING_APPS = {
-    "vk_dating": "6682509",      # VK Знакомства
-    "lovoo_vk": "7933647",       # Lovoo
-    "mamba": "7247498",          # Mamba  
-}
-
 
 class DOMResearcher:
     def __init__(self, page: Page):
@@ -55,96 +48,76 @@ class DOMResearcher:
         html_path.write_text(html, encoding="utf-8")
         console.print(f"📄 HTML: {html_path}")
         
-        # Поиск iframe (VK mini apps загружаются в iframe)
-        await self._analyze_iframes()
-        
         return self.findings
     
-    async def _analyze_iframes(self):
-        """Анализ iframe на странице"""
-        iframes = await self.page.query_selector_all("iframe")
-        console.print(f"\n🔍 Найдено iframe: {len(iframes)}")
+    async def analyze_vk_dating(self):
+        """Анализ VK Dating страницы (прямой DOM, не iframe)"""
+        console.print("\n🎯 Анализ VK Dating...")
         
-        for i, iframe in enumerate(iframes):
-            src = await iframe.get_attribute("src") or "no-src"
-            name = await iframe.get_attribute("name") or "no-name"
-            console.print(f"  [{i}] name={name}, src={src[:80]}..." if len(src) > 80 else f"  [{i}] name={name}, src={src}")
-            
-            self.findings["iframe_info"] = {
-                "count": len(iframes),
-                "main_src": src
-            }
-    
-    async def analyze_mini_app_frame(self):
-        """Анализ содержимого Mini App внутри iframe"""
-        console.print("\n🎯 Анализ Mini App iframe...")
-        
-        # Ждём загрузки iframe
-        try:
-            await self.page.wait_for_selector("iframe", timeout=10000)
-        except:
-            console.print("[red]❌ iframe не найден[/red]")
-            return None
-        
-        frame = self.page.frame_locator("iframe").first
-        
-        # Пробуем найти типичные элементы dating-приложений
         selectors_to_check = {
-            # Карточки профилей
-            "card_containers": [
-                ".card", ".profile-card", ".user-card", 
-                "[class*='card']", "[class*='Card']",
-                ".swipe-card", ".dating-card",
-                "[class*='profile']", "[class*='Profile']",
-                ".recommendation", "[class*='recommendation']"
+            # Навигация Dating
+            "navigation_tabs": [
+                "[class*='DatingTabs']", "[class*='dating-tabs']",
+                "[class*='TabsItem']", "[class*='tabs_item']",
+                "[data-tab]", ".vkuiTabsItem",
+                "a[href*='dating']", "[class*='Tabs']",
+                "[class*='vkuiTabs']"
             ],
-            # Кнопки действий
+            # Карточки анкет
+            "profile_cards": [
+                "[class*='DatingCard']", "[class*='dating-card']",
+                "[class*='DatingProfile']", "[class*='dating_profile']",
+                "[class*='Recommendation']", "[class*='recommendation']",
+                "[class*='StackCard']", "[class*='stack-card']",
+                "[class*='UserCard']", "[class*='user-card']",
+                "[class*='vkuiCard']"
+            ],
+            # Фото профиля
+            "profile_photos": [
+                "[class*='DatingPhoto']", "[class*='dating-photo']",
+                "[class*='ProfilePhoto']", "[class*='profile_photo']",
+                "[class*='Gallery']", ".vkuiImage",
+                "img[class*='dating']", "img[class*='profile']",
+                "[class*='Avatar']"
+            ],
+            # Информация профиля
+            "profile_info": [
+                "[class*='DatingName']", "[class*='dating-name']",
+                "[class*='ProfileName']", "[class*='profile_name']",
+                "[class*='DatingAge']", "[class*='dating-age']",
+                "[class*='DatingCity']", "[class*='dating-city']",
+                "[class*='DatingAbout']", "[class*='dating-about']",
+                "[class*='DatingBio']", "[class*='dating-bio']"
+            ],
+            # Кнопки действий (лайк/скип)
             "action_buttons": [
-                ".like-btn", ".dislike-btn", ".skip-btn",
-                "[class*='like']", "[class*='Like']",
-                "[class*='skip']", "[class*='Skip']",
-                "[class*='pass']", "[class*='Pass']",
-                "button[class*='action']",
-                ".btn-heart", ".btn-cross",
-                "[data-action]"
+                "[class*='DatingAction']", "[class*='dating-action']",
+                "[class*='LikeButton']", "[class*='like-button']",
+                "[class*='SkipButton']", "[class*='skip-button']",
+                "[class*='DislikeButton']", "[class*='dislike-button']",
+                "button[class*='dating']", "[class*='ActionButton']",
+                "[class*='DatingLike']", "[class*='DatingSkip']",
+                "[class*='DatingPass']"
             ],
-            # Информация о пользователе
-            "user_info": [
-                ".name", ".username", ".user-name",
-                "[class*='name']", "[class*='Name']",
-                ".age", "[class*='age']", "[class*='Age']",
-                ".bio", ".about", ".description",
-                "[class*='bio']", "[class*='about']",
-                ".city", ".location", "[class*='location']"
+            # Мэтчи
+            "matches": [
+                "[class*='Match']", "[class*='match']",
+                "[class*='DatingMatch']", "[class*='dating-match']",
+                "[class*='MutualLike']", "[class*='mutual']"
             ],
-            # Фотографии
-            "photos": [
-                ".photo", ".avatar", ".user-photo",
-                "[class*='photo']", "[class*='Photo']",
-                "[class*='image']", "[class*='Image']",
-                "img[class*='profile']", "img[class*='avatar']"
-            ],
-            # Навигация/табы
-            "navigation": [
-                ".tab", ".tabs", ".nav",
-                "[class*='tab']", "[class*='Tab']",
-                "[class*='nav']", "[class*='Nav']",
-                ".menu", "[class*='menu']"
-            ],
-            # Сообщения/чаты
-            "messaging": [
-                ".chat", ".message", ".dialog",
-                "[class*='chat']", "[class*='Chat']",
-                "[class*='message']", "[class*='Message']",
-                "[class*='dialog']", "[class*='Dialog']",
-                ".inbox", "[class*='inbox']"
+            # Чаты/Сообщения
+            "chats": [
+                "[class*='DatingChat']", "[class*='dating-chat']",
+                "[class*='DatingDialog']", "[class*='dating-dialog']",
+                "[class*='DatingMessage']", "[class*='dating-message']",
+                "[class*='Conversation']", "[class*='conversation']"
             ],
             # Boost/Premium
-            "boost_premium": [
-                ".boost", "[class*='boost']", "[class*='Boost']",
-                ".premium", "[class*='premium']", "[class*='Premium']",
-                ".vip", "[class*='vip']", "[class*='Vip']",
-                "[class*='super']", "[class*='Super']"
+            "boost": [
+                "[class*='Boost']", "[class*='boost']",
+                "[class*='Premium']", "[class*='premium']",
+                "[class*='Super']", "[class*='super']",
+                "[class*='DatingBoost']"
             ]
         }
         
@@ -154,20 +127,26 @@ class DOMResearcher:
             found_selectors[category] = []
             for selector in selectors:
                 try:
-                    count = await frame.locator(selector).count()
+                    count = await self.page.locator(selector).count()
                     if count > 0:
-                        # Получаем дополнительную информацию
-                        element = frame.locator(selector).first
+                        element = self.page.locator(selector).first
                         try:
                             text = await element.inner_text()
                             text = text[:50] + "..." if len(text) > 50 else text
                         except:
                             text = ""
                         
+                        # Получаем реальный класс элемента
+                        try:
+                            class_attr = await element.get_attribute("class") or ""
+                        except:
+                            class_attr = ""
+                        
                         found_selectors[category].append({
                             "selector": selector,
                             "count": count,
-                            "sample_text": text.strip()
+                            "sample_text": text.strip(),
+                            "actual_class": class_attr[:100]
                         })
                 except Exception as e:
                     pass
@@ -176,21 +155,11 @@ class DOMResearcher:
         return found_selectors
     
     async def extract_all_classes(self):
-        """Извлекает все уникальные CSS классы из iframe"""
+        """Извлекает все уникальные CSS классы со страницы"""
         console.print("\n📋 Извлечение всех CSS классов...")
         
         try:
-            # Получаем frame
-            frame_element = await self.page.query_selector("iframe")
-            if not frame_element:
-                return []
-            
-            frame = await frame_element.content_frame()
-            if not frame:
-                return []
-            
-            # Извлекаем все классы
-            classes = await frame.evaluate("""
+            classes = await self.page.evaluate("""
                 () => {
                     const allElements = document.querySelectorAll('*');
                     const classSet = new Set();
@@ -210,19 +179,11 @@ class DOMResearcher:
             return []
     
     async def get_dom_tree(self, max_depth: int = 4):
-        """Получает структуру DOM-дерева из iframe"""
+        """Получает структуру DOM-дерева"""
         console.print(f"\n🌳 Построение DOM-дерева (глубина {max_depth})...")
         
         try:
-            frame_element = await self.page.query_selector("iframe")
-            if not frame_element:
-                return None
-            
-            frame = await frame_element.content_frame()
-            if not frame:
-                return None
-            
-            tree = await frame.evaluate(f"""
+            tree = await self.page.evaluate(f"""
                 (maxDepth) => {{
                     function buildTree(element, depth) {{
                         if (depth > maxDepth) return null;
@@ -238,7 +199,7 @@ class DOMResearcher:
                             id: element.id || null,
                             classes: Array.from(element.classList),
                             childCount: element.children.length,
-                            children: children.slice(0, 10)  // Ограничиваем
+                            children: children.slice(0, 10)
                         }};
                     }}
                     return buildTree(document.body, 0);
@@ -287,15 +248,7 @@ async def wait_for_login(page: Page):
         title="Авторизация"
     ))
     input()
-    
-    # Проверяем что залогинились
-    try:
-        await page.wait_for_selector("#top_profile_link, .TopNavBtn, .top_profile_name", timeout=5000)
-        console.print("[green]✅ Успешная авторизация![/green]")
-        return True
-    except:
-        console.print("[yellow]⚠️ Не уверен в авторизации, продолжаем...[/yellow]")
-        return True
+    return True
 
 
 async def save_session(context, path: str = "output/session.json"):
@@ -327,21 +280,53 @@ async def main():
         use_saved = input().lower().strip() == "y"
     
     async with async_playwright() as p:
-        # Запускаем браузер в видимом режиме
+        # Запускаем браузер с anti-detection настройками
         browser = await p.chromium.launch(
             headless=False,
-            args=["--start-maximized"]
+            args=[
+                "--start-maximized",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--no-first-run",
+                "--no-default-browser-check"
+            ]
         )
         
         context_opts = {
             "viewport": {"width": 1920, "height": 1080},
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "locale": "ru-RU",
+            "timezone_id": "Europe/Moscow",
+            "color_scheme": "dark"
         }
         
         if use_saved and saved_session:
             context_opts["storage_state"] = saved_session
         
         context = await browser.new_context(**context_opts)
+        
+        # Добавляем скрипт для скрытия автоматизации
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            
+            // Подменяем plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            
+            // Подменяем languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['ru-RU', 'ru', 'en-US', 'en']
+            });
+            
+            // Chrome runtime
+            window.chrome = {
+                runtime: {}
+            };
+        """)
+        
         page = await context.new_page()
         
         # Переходим на VK
@@ -354,36 +339,25 @@ async def main():
             await wait_for_login(page)
             await save_session(context)
         
-        # Выбор приложения для исследования
-        console.print("\n[cyan]Выбери приложение для исследования:[/cyan]")
-        for i, (name, app_id) in enumerate(VK_DATING_APPS.items(), 1):
-            console.print(f"  {i}. {name} (app{app_id})")
-        console.print(f"  0. Ввести свой app_id")
+        # Переходим на VK Dating
+        console.print("\n💕 Открываю VK Dating...")
+        await page.goto("https://vk.com/dating")
         
-        choice = input("\nНомер: ").strip()
+        console.print("⏳ Ожидание загрузки (15 сек)...")
+        await asyncio.sleep(15)
         
-        if choice == "0":
-            app_id = input("Введи app_id: ").strip()
-        else:
-            app_id = list(VK_DATING_APPS.values())[int(choice) - 1]
-        
-        # Переходим на приложение
-        app_url = f"https://vk.com/app{app_id}"
-        console.print(f"\n🎮 Открываю {app_url}...")
-        await page.goto(app_url)
-        
-        # Ждём загрузки
-        console.print("⏳ Ожидание загрузки приложения (10 сек)...")
-        await asyncio.sleep(10)
+        # Делаем скриншот чтобы увидеть что загрузилось
+        await page.screenshot(path=str(OUTPUT_DIR / "dating_initial.png"))
+        console.print(f"📸 Скриншот: {OUTPUT_DIR / 'dating_initial.png'}")
         
         # Исследование
         researcher = DOMResearcher(page)
         
         # Анализ страницы
-        await researcher.analyze_page(f"app_{app_id}")
+        await researcher.analyze_page("vk_dating")
         
-        # Анализ iframe
-        await researcher.analyze_mini_app_frame()
+        # Анализ VK Dating
+        await researcher.analyze_vk_dating()
         
         # Извлечение классов
         await researcher.extract_all_classes()
@@ -397,7 +371,7 @@ async def main():
         
         # Интерактивный режим
         console.print("\n[bold cyan]🎮 Интерактивный режим[/bold cyan]")
-        console.print("Команды: [green]screenshot[/green], [green]analyze[/green], [green]classes[/green], [green]quit[/green]")
+        console.print("Команды: [green]screenshot[/green], [green]analyze[/green], [green]classes[/green], [green]tabs[/green], [green]quit[/green]")
         console.print("Можешь кликать в браузере и затем делать screenshot/analyze")
         
         while True:
@@ -409,16 +383,27 @@ async def main():
                 ts = datetime.now().strftime("%H%M%S")
                 await researcher.analyze_page(f"interactive_{ts}")
             elif cmd == "analyze" or cmd == "a":
-                await researcher.analyze_mini_app_frame()
+                await researcher.analyze_vk_dating()
                 researcher.print_summary()
             elif cmd == "classes" or cmd == "c":
                 classes = await researcher.extract_all_classes()
                 # Фильтруем интересные классы
                 interesting = [c for c in classes if any(kw in c.lower() for kw in 
-                    ["card", "profile", "user", "like", "skip", "swipe", "photo", "chat", "message", "boost"])]
+                    ["dating", "card", "profile", "user", "like", "skip", "swipe", "photo", "chat", "message", "boost", "match", "action"])]
                 console.print("\n[cyan]Интересные классы:[/cyan]")
-                for cls in interesting:
+                for cls in interesting[:50]:
                     console.print(f"  .{cls}")
+            elif cmd == "tabs":
+                # Попробуем кликнуть на разные табы
+                console.print("Пробую найти табы...")
+                tabs = await page.locator("[class*='Tab'], [class*='tab'], [data-tab]").all()
+                console.print(f"Найдено {len(tabs)} табов")
+                for i, tab in enumerate(tabs[:10]):
+                    try:
+                        text = await tab.inner_text()
+                        console.print(f"  [{i}] {text[:30]}")
+                    except:
+                        pass
             elif cmd == "save":
                 researcher.save_report(f"report_{datetime.now().strftime('%H%M%S')}.json")
             else:
