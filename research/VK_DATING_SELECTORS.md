@@ -1,4 +1,4 @@
-# VK Dating Selectors Research Results
+# VK Dating Selectors - Полная документация
 ## Дата исследования: 2026-01-08
 
 ## Важно: Мобильная версия
@@ -29,7 +29,7 @@ VK Dating лучше автоматизировать через **m.vk.com/dati
 | ↩️ Вернуть | replay_outline_28 | `button:has([class*="vkuiIcon--replay_outline_28"])` |
 | ⚡ Буст | flash_28 | `button:has([class*="vkuiIcon--flash_28"])` |
 
-### Данные профиля
+### Данные профиля в карточке
 | Данные | Селектор |
 |--------|----------|
 | Имя, возраст | `[class*="vkuiTitle__level2"][class*="accent"]` |
@@ -52,102 +52,218 @@ VK Dating лучше автоматизировать через **m.vk.com/dati
 - Два таба: **"Я нравлюсь"** / **"Мне нравятся"**
 - Сетка карточек с фото
 - Каждая карточка имеет кнопки ❌ и ❤️
+- Счётчик непросмотренных лайков в бейдже таба
 
 ### Селекторы
 | Элемент | Селектор |
 |---------|----------|
-| Таб "Я нравлюсь" | Первый `[class*="Segment"]` или `[class*="Tab"]` |
-| Таб "Мне нравятся" | Второй `[class*="Segment"]` или `[class*="Tab"]` |
-| Карточки | Обфусцированы, искать по наличию img + кнопок |
-| Кнопка пропустить в карточке | Кнопка с иконкой ❌ внутри карточки |
-| Кнопка лайк в карточке | Кнопка с иконкой ❤️ внутри карточки |
+| Карточки лайков | Сетка с фото + кнопками внутри |
+| Кнопка пропустить | Красная кнопка с ❌ |
+| Кнопка лайк | Синяя кнопка с ❤️ |
 
 ---
 
 ## Вкладка "Чаты" (#/chats)
 
-### Структура
-1. **Мэтчи** — горизонтальный скролл аватарок
+### Структура списка
+1. **Мэтчи** — горизонтальный скролл аватарок (новые мэтчи без сообщений)
 2. **Сообщения** — вертикальный список диалогов
 
-### Селекторы
+### Селекторы списка чатов
 | Элемент | Селектор |
 |---------|----------|
-| Секция мэтчей | Содержит `vkuiHorizontalCell` |
+| Секция мэтчей | `[class*="vkuiHorizontalCell"]` |
 | Аватарка мэтча | `[class*="vkuiHorizontalCell__image"]` |
 | Имя мэтча | `[class*="vkuiHorizontalCell__content"]` |
-| Список диалогов | `[class*="vkuiSimpleCell"]` или `[class*="vkuiRichCell"]` |
-| Имя в диалоге | `[class*="vkuiSimpleCell__children"]` |
-| Последнее сообщение | `[class*="vkuiSimpleCell__subtitle"]` |
-| Время | `[class*="vkuiCaption"]` |
+| Диалог в списке | `[class*="vkuiSimpleCell"]` или `[class*="vkuiRichCell"]` |
+| Непрочитанные | Бейдж с числом рядом с именем |
+
+### Внутри чата (#/chats/{user_id})
+
+| Элемент | Селектор |
+|---------|----------|
+| Поле ввода | `[class*="vkuiWriteBar__textarea"]` или `textarea[class*="WriteBar"]` |
+| Кнопка отправки | `[class*="vkuiWriteBarIcon__modeSend"]` или `button:has([class*="vkuiIcon--send_28"])` |
+| Эмодзи | `button:has([class*="vkuiIcon--smile_outline_28"])` |
+| Шаблоны | `button:has([class*="vkuiIcon--messages_outline_28"])` |
+| Назад | `button:has([class*="vkuiIcon--arrow_left_outline_28"])` |
+| Пожаловаться | `button:has([class*="vkuiIcon--report_outline_28"])` |
+
+### Сообщения в чате
+| Элемент | Селектор/Иконка |
+|---------|-----------------|
+| Прочитано (✓✓) | `vkuiIcon--check_double_outline_16` |
+| Лайк сообщения | `vkuiIcon--like_outline_20` |
+| Меню сообщения | `vkuiIcon--more_20` |
+
+### Пример отправки сообщения
+```python
+async def send_message(page, text: str):
+    # Вводим текст
+    textarea = page.locator('[class*="vkuiWriteBar__textarea"]')
+    await textarea.fill(text)
+    
+    # Ждём появления кнопки отправки
+    send_btn = page.locator('[class*="vkuiWriteBarIcon__modeSend"]')
+    await send_btn.wait_for(state="visible")
+    await send_btn.click()
+```
 
 ---
 
 ## Вкладка "Профиль" (#/profile)
 
-### Структура
-- Аватар с % заполненности (85%)
-- Имя, возраст, верификация, Premium badge
-- Кнопка "Изменить"
-- Счётчики: Суперлайк (5), Внимание (0)
-- Баннер Premium
+### Главный экран
+| Элемент | Описание |
+|---------|----------|
+| Аватар | С процентом заполненности (85%) |
+| Имя, возраст | "Роман, 38" + верификация + Premium |
+| Суперлайки | Счётчик доступных |
+| Внимание (буст) | Счётчик доступных |
 
-### Селекторы
+### Редактирование профиля (#/profile/edit)
+
+#### Секции редактирования
+| Секция | Тип поля | Placeholder / Описание |
+|--------|----------|------------------------|
+| **Фото и видео** | file input | Сетка до 6 фото, первое = главное |
+| **О себе** | textarea | "Расскажите, чем вы занимаетесь?" |
+| **Образование** | button/select | Выбор из списка учебных заведений |
+| **Работа** | textarea | "Кем вы работаете?" |
+| **Цель знакомства** | button | "Я ищу" → Новый опыт / Отношения / и тд |
+| **Личное** | теги-кнопки | Статус, рост, алкоголь, курение, спорт |
+| **Интересы** | теги-кнопки | IT, Отдых, Рестораны, Театры и тд |
+| **Музыка** | button | "Добавить исполнителей" |
+| **Фильмы** | textarea | "Что вы любите смотреть?" |
+| **Книги** | textarea | "Кто из авторов вас вдохновляет?" |
+| **Секреты** | checkbox | Скрыть возраст / расстояние / Premium |
+
+#### Селекторы редактирования
 | Элемент | Селектор |
 |---------|----------|
-| Имя | Текст перед запятой в заголовке |
-| Возраст | Текст после запятой |
-| Кнопка редактирования | Кнопка с текстом "Изменить" |
-| Счётчик суперлайков | Элемент рядом с текстом "Суперлайк" |
-| Счётчик внимания | Элемент рядом с текстом "Внимание" |
+| Сохранить | Кнопка с текстом "Сохранить" или ✓ в header |
+| Отмена | Кнопка с текстом "Отмена" или ✕ в header |
+| Textarea поля | `textarea[placeholder*="..."]` |
+| Добавить фото | Кнопка + в сетке фото |
+| Удалить фото | ✕ на углу фото |
 
 ---
 
 ## Общие иконки
 
 ```
-vkuiIcon--arrow_left_outline_24   - Назад
+# Навигация
+vkuiIcon--arrow_left_outline_24   - Назад (маленькая)
 vkuiIcon--arrow_left_outline_28   - Назад (большая)
-vkuiIcon--filter_24               - Фильтры
-vkuiIcon--sliders_outline_28      - Настройки фильтров
-vkuiIcon--chevron_up_small_24     - Развернуть
-vkuiIcon--cancel_outline_28       - Пропустить/Закрыть
+vkuiIcon--chevron_down_outline_28 - Вниз/развернуть
+
+# Действия с анкетами
+vkuiIcon--cancel_outline_28       - Пропустить
 vkuiIcon--fire_alt_outline_28     - Суперлайк
 vkuiIcon--like_outline_28         - Лайк
 vkuiIcon--replay_outline_28       - Вернуть
 vkuiIcon--flash_28                - Буст/Внимание
-vkuiIcon--cards_2_outline_28      - Таб Анкеты
-vkuiIcon--search_like_outline_28  - Таб Подборки
-vkuiIcon--message_outline_28      - Таб Чаты
-vkuiIcon--user_circle_outline_28  - Таб Профиль
+
+# Табы
+vkuiIcon--cards_2_outline_28      - Анкеты
+vkuiIcon--search_like_outline_28  - Подборки
+vkuiIcon--like_outline_28         - Лайки (в табе)
+vkuiIcon--message_outline_28      - Чаты
+vkuiIcon--user_circle_outline_28  - Профиль
+
+# Чат
+vkuiIcon--send_28                 - Отправить сообщение
+vkuiIcon--smile_outline_28        - Эмодзи
+vkuiIcon--messages_outline_28     - Шаблоны сообщений
+vkuiIcon--check_double_outline_16 - Прочитано
+vkuiIcon--like_outline_20         - Лайк сообщения
+vkuiIcon--more_20                 - Меню сообщения
+vkuiIcon--report_outline_28       - Пожаловаться
+
+# Фильтры
+vkuiIcon--filter_24               - Фильтры
+vkuiIcon--sliders_outline_28      - Настройки фильтров
+
+# Инфо в профиле
+vkuiIcon--place_12                - Локация
+vkuiIcon--work_outline_20         - Работа
+vkuiIcon--education_outline_20    - Образование
+vkuiIcon--quote_closing_20        - Цитата
+vkuiIcon--hearts_2_28             - Мэтч
+```
+
+---
+
+## Примеры кода
+
+### Свайп анкет
+```python
+async def swipe_cards(page, max_swipes=50):
+    for _ in range(max_swipes):
+        # Парсим карточку
+        name_el = page.locator('[class*="vkuiTitle__level2"][class*="accent"]').first
+        name_text = await name_el.inner_text()  # "Алла, 35"
+        
+        # Решение (тут логика оценки)
+        like = evaluate(name_text)
+        
+        # Действие
+        if like:
+            await page.locator('button:has([class*="vkuiIcon--like_outline_28"])').first.click()
+        else:
+            await page.locator('button:has([class*="vkuiIcon--cancel_outline_28"])').first.click()
+        
+        await asyncio.sleep(1.5)
+```
+
+### Отправка сообщения
+```python
+async def send_message(page, user_id: str, text: str):
+    # Переходим в чат
+    await page.goto(f"https://m.vk.com/dating#/chats/{user_id}")
+    await page.wait_for_selector('[class*="vkuiWriteBar__textarea"]')
+    
+    # Вводим текст
+    await page.locator('[class*="vkuiWriteBar__textarea"]').fill(text)
+    
+    # Отправляем
+    await page.locator('[class*="vkuiWriteBarIcon__modeSend"]').click()
+```
+
+### Получение списка чатов
+```python
+async def get_chats(page):
+    await page.goto("https://m.vk.com/dating#/chats")
+    
+    # Мэтчи (горизонтальный список)
+    matches = page.locator('[class*="vkuiHorizontalCell__content"]')
+    match_names = await matches.all_inner_texts()
+    
+    # Диалоги (вертикальный список)
+    dialogs = page.locator('[class*="vkuiSimpleCell"], [class*="vkuiRichCell"]')
+    # ...
 ```
 
 ---
 
 ## Примечания
 
-1. **Обфускация классов** — классы типа `DvDUWVqV` меняются при сборке, не использовать
+1. **Обфускация классов** — классы типа `DvDUWVqV`, `Gk4oo6P9` меняются при сборке, НЕ использовать
 2. **Стабильные классы** — всё что начинается с `vkui` 
 3. **Поиск по иконкам** — самый надёжный способ идентификации кнопок
 4. **App ID**: `7058363`
-5. **Premium** даёт: безлимитные свайпы, видеть кто лайкнул, суперлайки
+5. **Premium** даёт: безлимитные свайпы, видеть кто лайкнул, суперлайки, буст
 
 ---
 
-## Пример парсинга карточки
+## URL структура
 
-```python
-async def parse_card(page):
-    # Имя и возраст
-    name_el = page.locator('[class*="vkuiTitle__level2"][class*="accent"]').first
-    name_text = await name_el.inner_text()  # "Алла, 35"
-    
-    # Парсим
-    match = re.match(r'^(.+?),\s*(\d+)$', name_text)
-    name = match.group(1)  # "Алла"
-    age = int(match.group(2))  # 35
-    
-    # Действия
-    await page.locator('button:has([class*="vkuiIcon--like_outline_28"])').first.click()  # Лайк
-    await page.locator('button:has([class*="vkuiIcon--cancel_outline_28"])').first.click()  # Пропуск
+```
+https://m.vk.com/dating#/                    - Анкеты (свайпы)
+https://m.vk.com/dating#/collections         - Подборки
+https://m.vk.com/dating#/incoming_reactions  - Лайки
+https://m.vk.com/dating#/chats               - Список чатов
+https://m.vk.com/dating#/chats/{user_id}     - Конкретный чат
+https://m.vk.com/dating#/profile             - Профиль
+https://m.vk.com/dating#/profile/edit        - Редактирование профиля
 ```
