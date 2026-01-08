@@ -13,24 +13,22 @@ from playwright.async_api import async_playwright
 
 class VKSelectors:
     """Селекторы VK Dating (m.vk.com/dating)"""
-    # Кнопки действий
-    BTN_SKIP = 'button:has([class*="vkuiIcon--cancel_outline_28"])'
-    BTN_LIKE = 'button:has([class*="vkuiIcon--like_outline_28"]):not([class*="TabbarItem"])'
-    BTN_SUPERLIKE = 'button:has([class*="vkuiIcon--fire_alt_outline_28"])'
+    # Кнопки действий - ищем по иконкам
+    BTN_SKIP = 'button:has([class*="cancel_outline"]), button:has([class*="Icon--cancel"])'
+    BTN_LIKE = 'button:has([class*="like_outline"]):not([class*="TabbarItem"]), button:has([class*="heart"]):not([class*="TabbarItem"])'
+    BTN_SUPERLIKE = 'button:has([class*="fire"]), button:has([class*="flame"])'
     
-    # Данные профиля
-    PROFILE_NAME = '[class*="vkuiTitle__level2"][class*="accent"]'
-    PROFILE_INFO = '[class*="vkuiMiniInfoCell"]'
-    PROFILE_TEXT = '[class*="vkuiText"], [class*="vkuiParagraph"]'
+    # Данные профиля - более широкие селекторы
+    PROFILE_NAME = '[class*="Title"][class*="accent"], [class*="Title"][class*="level-2"]'
+    PROFILE_INFO = '[class*="MiniInfoCell"], [class*="Subhead"]'
     
-    # Чат
-    CHAT_INPUT = '[class*="vkuiWriteBar__textarea"]'
-    CHAT_SEND = '[class*="vkuiWriteBarIcon__modeSend"]'
+    # Табы - по тексту
+    TAB_CHATS = 'text=Чаты'
+    TAB_PROFILE = 'text=Профиль'
+    TAB_CARDS = 'text=Анкеты'
     
-    # Табы
-    TAB_CARDS = '[class*="vkuiIcon--cards_2_outline_28"]'
-    TAB_CHATS = '[class*="vkuiIcon--message_outline_28"]'
-    TAB_PROFILE = '[class*="vkuiIcon--user_circle_outline_28"]'
+    # Кнопка входа в Dating
+    BTN_ENTER_DATING = 'button:has-text("Войти"), button:has-text("Начать")'
 
 
 async def test_vk_dating():
@@ -71,72 +69,98 @@ async def test_vk_dating():
         """)
         
         page = await context.new_page()
+        page.set_default_timeout(5000)  # Уменьшаем таймаут для быстрого фидбека
         
         # Переходим на Dating
         print("📱 Открываем m.vk.com/dating...")
         await page.goto("https://m.vk.com/dating", wait_until="domcontentloaded")
+        await asyncio.sleep(2)
         
-        # Ждём загрузки
-        await asyncio.sleep(3)
-        
-        # Проверяем авторизацию
+        # Проверяем нужен ли вход в Dating
         current_url = page.url
         print(f"📍 Текущий URL: {current_url}")
         
-        if "login" in current_url or "auth" in current_url:
-            print("❌ Сессия истекла! Запустите: py auth_vk.py")
-            await browser.close()
-            return
+        # Ищем кнопку входа
+        enter_btn = page.locator(VKSelectors.BTN_ENTER_DATING).first
+        if await enter_btn.is_visible():
+            print("🔑 Требуется вход в Dating...")
+            await enter_btn.click()
+            print("⏳ Ждём загрузки анкет...")
+            await asyncio.sleep(3)
         
-        # Пробуем найти карточку
-        print("🔍 Ищем карточку профиля...")
-        try:
-            name_el = page.locator(VKSelectors.PROFILE_NAME).first
-            await name_el.wait_for(timeout=10000)
-            name_text = await name_el.inner_text()
-            print(f"✅ Найдена карточка: {name_text}")
-            
-            # Парсим имя и возраст
-            match = re.match(r'^(.+?),\s*(\d+)$', name_text.strip())
-            if match:
-                print(f"   Имя: {match.group(1)}")
-                print(f"   Возраст: {match.group(2)}")
-            
-            # Получаем дополнительную инфу
-            info_els = page.locator(VKSelectors.PROFILE_INFO)
-            count = await info_els.count()
-            if count > 0:
-                print(f"   Инфо:")
-                for i in range(min(count, 3)):
-                    text = await info_els.nth(i).inner_text()
-                    print(f"     - {text}")
-            
-        except Exception as e:
-            print(f"⚠️ Карточка не найдена: {e}")
-            await page.screenshot(path="debug_screenshot.png")
-            print("📸 Скриншот сохранён: debug_screenshot.png")
+        # Ждём появления кнопок действий
+        print("🔍 Ищем кнопки...")
+        await asyncio.sleep(2)
         
-        # Тест кнопок
+        # Проверяем кнопки
         print("\n🎮 Тест кнопок:")
         
-        skip_btn = page.locator(VKSelectors.BTN_SKIP).first
-        like_btn = page.locator(VKSelectors.BTN_LIKE).first
+        # Пробуем разные селекторы для skip
+        skip_selectors = [
+            'button:has([class*="cancel"])',
+            '[class*="ActionButton"]:first-child',
+            'button >> nth=0'
+        ]
         
-        skip_visible = await skip_btn.is_visible()
-        like_visible = await like_btn.is_visible()
+        skip_found = False
+        for sel in skip_selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.is_visible():
+                    print(f"   ❌ Skip: ✅ найдена ({sel})")
+                    skip_found = True
+                    VKSelectors.BTN_SKIP = sel
+                    break
+            except:
+                pass
+        if not skip_found:
+            print("   ❌ Skip: не найдена")
         
-        print(f"   ❌ Skip: {'✅ видна' if skip_visible else '❌ не видна'}")
-        print(f"   ❤️ Like: {'✅ видна' if like_visible else '❌ не видна'}")
+        # Пробуем разные селекторы для like
+        like_selectors = [
+            'button:has([class*="like"])',
+            'button:has([class*="heart"])',
+            '[class*="ActionButton"]:last-child',
+            'button >> nth=-1'
+        ]
+        
+        like_found = False
+        for sel in like_selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.is_visible():
+                    print(f"   ❤️ Like: ✅ найдена ({sel})")
+                    like_found = True
+                    VKSelectors.BTN_LIKE = sel
+                    break
+            except:
+                pass
+        if not like_found:
+            print("   ❤️ Like: не найдена")
+        
+        # Ищем имя профиля
+        print("\n🔍 Ищем имя профиля...")
+        name_found = False
+        name_text = ""
+        
+        # Ищем текст с паттерном "Имя, возраст"
+        all_text = await page.locator('body').inner_text()
+        match = re.search(r'([А-Яа-яЁё]+),\s*(\d{2})', all_text)
+        if match:
+            name_text = f"{match.group(1)}, {match.group(2)}"
+            print(f"   👤 Найдено: {name_text}")
+            name_found = True
         
         # Интерактивный режим
         print("\n" + "="*50)
         print("🎮 ИНТЕРАКТИВНЫЙ РЕЖИМ")
         print("="*50)
         print("Команды:")
-        print("  l - лайк")
-        print("  s - скип")
+        print("  l - лайк (клик по правой кнопке)")
+        print("  s - скип (клик по левой кнопке)")
         print("  p - парсить карточку")
         print("  c - перейти в чаты")
+        print("  d - debug (показать HTML)")
         print("  q - выход")
         print("="*50)
         
@@ -148,33 +172,79 @@ async def test_vk_dating():
                 
             elif cmd == 'l':
                 try:
-                    await page.locator(VKSelectors.BTN_LIKE).first.click()
-                    print("❤️ Лайк!")
+                    # Ищем кнопку лайка (обычно справа, фиолетовая)
+                    buttons = page.locator('button').all()
+                    btns = await buttons
+                    if len(btns) >= 3:
+                        await btns[-1].click()  # Последняя кнопка - лайк
+                        print("❤️ Лайк!")
+                    else:
+                        # Пробуем по цвету/позиции
+                        await page.evaluate('''
+                            document.querySelectorAll('button').forEach(b => {
+                                if (b.querySelector('[class*="like"]') || b.querySelector('[class*="heart"]')) {
+                                    b.click();
+                                }
+                            });
+                        ''')
+                        print("❤️ Лайк (через JS)!")
                     await asyncio.sleep(1)
                 except Exception as e:
                     print(f"Ошибка: {e}")
                     
             elif cmd == 's':
                 try:
-                    await page.locator(VKSelectors.BTN_SKIP).first.click()
-                    print("❌ Скип!")
+                    # Ищем кнопку скипа (обычно слева, красная)
+                    buttons = page.locator('button').all()
+                    btns = await buttons
+                    if len(btns) >= 3:
+                        await btns[-3].click()  # Третья с конца - скип
+                        print("❌ Скип!")
+                    else:
+                        await page.evaluate('''
+                            document.querySelectorAll('button').forEach(b => {
+                                if (b.querySelector('[class*="cancel"]') || b.querySelector('[class*="close"]')) {
+                                    b.click();
+                                }
+                            });
+                        ''')
+                        print("❌ Скип (через JS)!")
                     await asyncio.sleep(1)
                 except Exception as e:
                     print(f"Ошибка: {e}")
                     
             elif cmd == 'p':
                 try:
-                    name_el = page.locator(VKSelectors.PROFILE_NAME).first
-                    name_text = await name_el.inner_text()
-                    print(f"👤 {name_text}")
+                    all_text = await page.locator('body').inner_text()
+                    match = re.search(r'([А-Яа-яЁё]+),\s*(\d{2})', all_text)
+                    if match:
+                        print(f"👤 {match.group(1)}, {match.group(2)}")
+                    else:
+                        print("Карточка не найдена")
                 except Exception as e:
                     print(f"Ошибка: {e}")
                     
             elif cmd == 'c':
                 try:
-                    await page.locator(VKSelectors.TAB_CHATS).click()
+                    await page.locator('text=Чаты').click()
                     print("💬 Переход в чаты...")
                     await asyncio.sleep(2)
+                except Exception as e:
+                    print(f"Ошибка: {e}")
+                    
+            elif cmd == 'd':
+                # Debug - показать структуру кнопок
+                try:
+                    buttons_html = await page.evaluate('''
+                        Array.from(document.querySelectorAll('button')).slice(-5).map(b => ({
+                            class: b.className.slice(0, 50),
+                            text: b.innerText.slice(0, 20),
+                            icons: Array.from(b.querySelectorAll('[class*="Icon"]')).map(i => i.className.slice(0, 40))
+                        }))
+                    ''')
+                    print("🔧 Последние 5 кнопок:")
+                    for i, btn in enumerate(buttons_html):
+                        print(f"  {i}: {btn}")
                 except Exception as e:
                     print(f"Ошибка: {e}")
         
