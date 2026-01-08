@@ -1,21 +1,14 @@
 """
 Тестовый скрипт для проверки VK Dating автоматизации
-Запуск: python test_vk_dating.py
+Запуск: py test_vk_dating.py
 """
 import asyncio
 import os
 import re
+import json
 from datetime import datetime
-from dotenv import load_dotenv
-
-# Загружаем .env
-load_dotenv()
 
 from playwright.async_api import async_playwright
-
-# VK Cookies из .env
-VK_REMIXSID = os.getenv("VK_REMIXSID", "")
-VK_REMIXNSID = os.getenv("VK_REMIXNSID", "")
 
 
 class VKSelectors:
@@ -45,27 +38,31 @@ async def test_vk_dating():
     
     print("🚀 Запуск теста VK Dating...")
     
-    if not VK_REMIXSID:
-        print("❌ VK_REMIXSID не установлен!")
-        print("   Запустите: py setup_env.py")
+    # Проверяем наличие сессии
+    session_path = os.path.join(os.path.dirname(__file__), "vk_session.json")
+    
+    if not os.path.exists(session_path):
+        print("❌ Файл сессии не найден!")
+        print("   Сначала запустите: py auth_vk.py")
         return
     
-    print(f"✅ Cookies загружены (remixsid: {VK_REMIXSID[:20]}...)")
+    print(f"✅ Сессия найдена: {session_path}")
     
     async with async_playwright() as p:
-        # Запуск браузера (headless=False для отладки)
+        # Запуск браузера
         print("🌐 Запуск браузера...")
         browser = await p.chromium.launch(
-            headless=False,  # Поменять на True для продакшена
+            headless=False,
             args=['--disable-blink-features=AutomationControlled']
         )
         
-        # Контекст с мобильным UA
+        # Загружаем сохранённую сессию
         context = await browser.new_context(
             viewport={"width": 414, "height": 896},
             user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
             locale="ru-RU",
-            timezone_id="Europe/Moscow"
+            timezone_id="Europe/Moscow",
+            storage_state=session_path
         )
         
         # Anti-detection
@@ -74,29 +71,6 @@ async def test_vk_dating():
         """)
         
         page = await context.new_page()
-        
-        # Устанавливаем cookies
-        print("🍪 Устанавливаем cookies...")
-        await context.add_cookies([
-            {
-                "name": "remixsid",
-                "value": VK_REMIXSID,
-                "domain": ".vk.com",
-                "path": "/"
-            },
-            {
-                "name": "remixnsid",
-                "value": VK_REMIXNSID,
-                "domain": ".vk.com",
-                "path": "/"
-            },
-            {
-                "name": "remixlang",
-                "value": "0",
-                "domain": ".vk.com",
-                "path": "/"
-            }
-        ])
         
         # Переходим на Dating
         print("📱 Открываем m.vk.com/dating...")
@@ -110,7 +84,7 @@ async def test_vk_dating():
         print(f"📍 Текущий URL: {current_url}")
         
         if "login" in current_url or "auth" in current_url:
-            print("❌ Требуется авторизация! Cookies недействительны.")
+            print("❌ Сессия истекла! Запустите: py auth_vk.py")
             await browser.close()
             return
         
@@ -139,7 +113,6 @@ async def test_vk_dating():
             
         except Exception as e:
             print(f"⚠️ Карточка не найдена: {e}")
-            # Делаем скриншот для отладки
             await page.screenshot(path="debug_screenshot.png")
             print("📸 Скриншот сохранён: debug_screenshot.png")
         
@@ -205,7 +178,13 @@ async def test_vk_dating():
                 except Exception as e:
                     print(f"Ошибка: {e}")
         
-        print("\n👋 Закрываем браузер...")
+        # Сохраняем обновлённую сессию
+        print("\n💾 Сохраняю сессию...")
+        storage = await context.storage_state()
+        with open(session_path, "w", encoding="utf-8") as f:
+            json.dump(storage, f, ensure_ascii=False, indent=2)
+        
+        print("👋 Закрываем браузер...")
         await browser.close()
         print("✅ Тест завершён!")
 
