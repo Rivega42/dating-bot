@@ -18,15 +18,16 @@ async def auth_vk():
     print()
     
     async with async_playwright() as p:
-        # Запуск видимого браузера
+        # Запуск видимого браузера - ДЕСКТОПНЫЙ режим для QR кода
         browser = await p.chromium.launch(
             headless=False,
             args=['--disable-blink-features=AutomationControlled']
         )
         
+        # Десктопный контекст для авторизации (там есть QR)
         context = await browser.new_context(
-            viewport={"width": 414, "height": 896},
-            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+            viewport={"width": 1280, "height": 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             locale="ru-RU",
             timezone_id="Europe/Moscow"
         )
@@ -40,13 +41,18 @@ async def auth_vk():
         
         # Открываем VK
         print("🌐 Открываю vk.com...")
-        await page.goto("https://m.vk.com/dating", wait_until="domcontentloaded")
+        await page.goto("https://vk.com", wait_until="domcontentloaded")
         
         # Ждём пока пользователь авторизуется
         print()
-        print("👆 Авторизуйтесь в открытом браузере!")
+        print("👆 Авторизуйтесь в открытом браузере (через QR или логин)!")
         print()
-        input("✅ После входа в VK Dating нажмите Enter здесь...")
+        input("✅ После входа в VK нажмите Enter здесь...")
+        
+        # Теперь переходим на Dating чтобы убедиться что всё работает
+        print("📱 Переходим на Dating...")
+        await page.goto("https://vk.com/dating", wait_until="domcontentloaded")
+        await asyncio.sleep(3)
         
         # Проверяем что авторизовались
         current_url = page.url
