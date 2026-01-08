@@ -1,9 +1,9 @@
 """
 Тестовый скрипт для VK Dating (десктоп)
-Горячие клавиши:
-  < (Б) - Дизлайк
-  > (Ю) - Лайк
-  ← → - Листать фото
+Горячие клавиши VK:
+  < (Б/,) - Дизлайк
+  > (Ю/.) - Лайк
+  ← → (стрелки) - Листать фото
 
 Запуск: py test_vk_dating.py
 """
@@ -71,15 +71,15 @@ async def test_vk_dating():
         print("\n" + "="*50)
         print("🎮 УПРАВЛЕНИЕ")
         print("="*50)
-        print("  l или ю - Лайк (клавиша >)")
-        print("  d или б - Дизлайк (клавиша <)")
-        print("  s       - Суперлайк")
-        print("  ←  (4)  - Предыдущее фото")
-        print("  →  (6)  - Следующее фото")
-        print("  p       - Показать профиль")
-        print("  t       - Вкладки (Анкеты/Лайки/Чаты)")
-        print("  r       - Обновить страницу")
-        print("  q       - Выход")
+        print("  l (или ю/.) - Лайк")
+        print("  d (или б/,) - Дизлайк")
+        print("  s           - Суперлайк")
+        print("  a (или ф)   - ← Предыдущее фото")
+        print("  f (или а)   - → Следующее фото")
+        print("  p           - Показать профиль")
+        print("  t           - Вкладки")
+        print("  r           - Обновить")
+        print("  q           - Выход")
         print("="*50)
         
         while True:
@@ -93,11 +93,10 @@ async def test_vk_dating():
                 await page.keyboard.press('.')
                 print("❤️ Лайк!")
                 await asyncio.sleep(1)
-                # Показать новую карточку
                 all_text = await page.locator('body').inner_text()
                 profile = parse_profile(all_text)
                 if profile:
-                    print(f"👤 Новая карточка: {profile}")
+                    print(f"👤 Новая: {profile}")
                     
             elif cmd in ['d', 'б', ',', '<']:
                 # Дизлайк - клавиша < (запятая/Б)
@@ -107,19 +106,19 @@ async def test_vk_dating():
                 all_text = await page.locator('body').inner_text()
                 profile = parse_profile(all_text)
                 if profile:
-                    print(f"👤 Новая карточка: {profile}")
+                    print(f"👤 Новая: {profile}")
                     
             elif cmd == 's':
-                # Суперлайк - пробуем разные варианты
+                # Суперлайк
                 await page.keyboard.press('/')
                 print("🔥 Суперлайк!")
                 await asyncio.sleep(1)
                     
-            elif cmd in ['4', 'left', 'л']:
+            elif cmd in ['a', 'ф', 'left']:
                 await page.keyboard.press('ArrowLeft')
                 print("⬅️ Предыдущее фото")
                 
-            elif cmd in ['6', 'right', 'п']:
+            elif cmd in ['f', 'а', 'right']:
                 await page.keyboard.press('ArrowRight')
                 print("➡️ Следующее фото")
                 
@@ -128,7 +127,6 @@ async def test_vk_dating():
                 profile = parse_profile(all_text)
                 if profile:
                     print(f"👤 {profile}")
-                    # Ищем дополнительную инфу
                     for section in ['Я ищу', 'Работа', 'Интересы', 'Личное']:
                         if section in all_text:
                             idx = all_text.index(section)
