@@ -6,9 +6,14 @@ import asyncio
 import os
 import re
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Загружаем .env
+load_dotenv()
+
 from playwright.async_api import async_playwright
 
-# VK Cookies из .env или напрямую
+# VK Cookies из .env
 VK_REMIXSID = os.getenv("VK_REMIXSID", "")
 VK_REMIXNSID = os.getenv("VK_REMIXNSID", "")
 
@@ -42,11 +47,14 @@ async def test_vk_dating():
     
     if not VK_REMIXSID:
         print("❌ VK_REMIXSID не установлен!")
-        print("   Создайте файл .env или установите переменную окружения")
+        print("   Запустите: py setup_env.py")
         return
+    
+    print(f"✅ Cookies загружены (remixsid: {VK_REMIXSID[:20]}...)")
     
     async with async_playwright() as p:
         # Запуск браузера (headless=False для отладки)
+        print("🌐 Запуск браузера...")
         browser = await p.chromium.launch(
             headless=False,  # Поменять на True для продакшена
             args=['--disable-blink-features=AutomationControlled']
