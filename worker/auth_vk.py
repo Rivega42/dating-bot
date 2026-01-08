@@ -14,7 +14,7 @@ async def auth_vk():
     print("=" * 50)
     print()
     print("Откроется браузер. Войдите в свой аккаунт VK.")
-    print("После входа нажмите Enter в этом окне.")
+    print("Дождитесь полной загрузки главной страницы VK!")
     print()
     
     async with async_playwright() as p:
@@ -46,28 +46,51 @@ async def auth_vk():
         # Ждём пока пользователь авторизуется
         print()
         print("👆 Авторизуйтесь в открытом браузере (через QR или логин)!")
+        print("⏳ Дождитесь загрузки ленты новостей!")
         print()
-        input("✅ После входа в VK нажмите Enter здесь...")
+        input("✅ После полного входа в VK нажмите Enter здесь...")
         
-        # Теперь переходим на Dating чтобы убедиться что всё работает
-        print("📱 Переходим на Dating...")
-        await page.goto("https://vk.com/dating", wait_until="domcontentloaded")
+        # Ждём стабилизации
+        print("⏳ Ждём завершения редиректов...")
         await asyncio.sleep(3)
         
-        # Проверяем что авторизовались
         current_url = page.url
         print(f"📍 Текущий URL: {current_url}")
         
-        if "login" in current_url or "auth" in current_url:
-            print("❌ Похоже вы не авторизовались. Попробуйте ещё раз.")
-            await browser.close()
-            return
+        # Проверяем что авторизовались (не на странице логина)
+        if "login" in current_url and "act=restore" not in current_url:
+            print("⚠️ Кажется вы ещё не авторизовались.")
+            print("   Войдите в VK и нажмите Enter ещё раз.")
+            input("✅ Нажмите Enter когда будете на главной странице VK...")
+            await asyncio.sleep(2)
         
-        # Сохраняем сессию
+        # Сохраняем сессию СРАЗУ (без перехода на Dating)
         print("💾 Сохраняю сессию...")
         storage = await context.storage_state()
         
         session_path = os.path.join(os.path.dirname(__file__), "vk_session.json")
+        with open(session_path, "w", encoding="utf-8") as f:
+            json.dump(storage, f, ensure_ascii=False, indent=2)
+        
+        # Теперь пробуем перейти на Dating
+        print("📱 Переходим на Dating...")
+        try:
+            await page.goto("https://vk.com/dating", wait_until="networkidle", timeout=30000)
+        except Exception as e:
+            print(f"⚠️ Редирект при переходе: {e}")
+            # Ждём и пробуем ещё раз
+            await asyncio.sleep(3)
+            try:
+                await page.goto("https://vk.com/dating", wait_until="domcontentloaded", timeout=30000)
+            except:
+                pass
+        
+        await asyncio.sleep(2)
+        final_url = page.url
+        print(f"📍 Финальный URL: {final_url}")
+        
+        # Обновляем сессию после Dating
+        storage = await context.storage_state()
         with open(session_path, "w", encoding="utf-8") as f:
             json.dump(storage, f, ensure_ascii=False, indent=2)
         
