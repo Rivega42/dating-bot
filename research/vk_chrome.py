@@ -1,77 +1,118 @@
 #!/usr/bin/env python3
 """
-VK Dating Research - используя реальный профиль Chrome
+VK Dating Research - используя копию профиля Chrome
 
-Запускает твой настоящий Chrome с сохранённым профилем,
-чтобы обойти детекцию автоматизации.
+Копирует cookies из Chrome и использует их в Playwright.
 """
 
 import asyncio
 import json
+import shutil
 import os
-import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 console = Console()
 
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# Путь к Chrome профилю (Windows)
-CHROME_USER_DATA = Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "User Data"
+# Папка для копии профиля
+PLAYWRIGHT_PROFILE = Path("output/chrome_profile")
 
 
 async def main():
     console.print(Panel(
         "[bold blue]VK Dating Research[/bold blue]\n"
-        "Используем реальный Chrome профиль",
-        title="🔬 Research v2"
+        "Копируем профиль Chrome для исследования",
+        title="🔬 Research v3"
     ))
     
-    # Проверяем что Chrome закрыт
-    console.print("\n[yellow]⚠️  ВАЖНО: Закрой все окна Chrome перед продолжением![/yellow]")
-    console.print("Нажми Enter когда Chrome закрыт...")
-    input()
+    # Проверяем/создаём копию профиля
+    chrome_user_data = Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "User Data"
+    
+    if not PLAYWRIGHT_PROFILE.exists():
+        console.print("\n[yellow]📁 Создаю копию профиля Chrome...[/yellow]")
+        console.print("[yellow]⚠️  ВАЖНО: Закрой Chrome перед копированием![/yellow]")
+        console.print("Нажми Enter когда Chrome закрыт...")
+        input()
+        
+        try:
+            # Копируем только нужные файлы (cookies, storage)
+            PLAYWRIGHT_PROFILE.mkdir(parents=True, exist_ok=True)
+            default_src = chrome_user_data / "Default"
+            default_dst = PLAYWRIGHT_PROFILE / "Default"
+            default_dst.mkdir(exist_ok=True)
+            
+            # Копируем cookies и данные сессии
+            files_to_copy = ["Cookies", "Login Data", "Web Data", "Preferences", "Secure Preferences"]
+            for f in files_to_copy:
+                src = default_src / f
+                if src.exists():
+                    shutil.copy2(src, default_dst / f)
+                    console.print(f"  ✅ {f}")
+            
+            # Копируем Local Storage
+            local_storage_src = default_src / "Local Storage"
+            if local_storage_src.exists():
+                shutil.copytree(local_storage_src, default_dst / "Local Storage", dirs_exist_ok=True)
+                console.print("  ✅ Local Storage")
+            
+            # Копируем Session Storage  
+            session_storage_src = default_src / "Session Storage"
+            if session_storage_src.exists():
+                shutil.copytree(session_storage_src, default_dst / "Session Storage", dirs_exist_ok=True)
+                console.print("  ✅ Session Storage")
+                
+            console.print("[green]✅ Профиль скопирован![/green]")
+            
+        except Exception as e:
+            console.print(f"[red]Ошибка копирования: {e}[/red]")
+            console.print("Убедись что Chrome закрыт и попробуй снова")
+            return
+    else:
+        console.print(f"\n[green]✅ Используем существующий профиль: {PLAYWRIGHT_PROFILE}[/green]")
     
     async with async_playwright() as p:
-        # Запускаем Chrome с реальным профилем
-        console.print("\n🚀 Запускаю Chrome с твоим профилем...")
+        console.print("\n🚀 Запускаю браузер...")
         
         try:
             browser = await p.chromium.launch_persistent_context(
-                user_data_dir=str(CHROME_USER_DATA),
-                channel="chrome",  # Используем установленный Chrome
+                user_data_dir=str(PLAYWRIGHT_PROFILE),
                 headless=False,
                 args=[
                     "--start-maximized",
-                    "--profile-directory=Default"  # Основной профиль
+                    "--disable-blink-features=AutomationControlled",
                 ],
                 viewport={"width": 1920, "height": 1080},
-                timeout=60000  # 60 секунд на запуск
+                locale="ru-RU",
+                timezone_id="Europe/Moscow"
             )
-            console.print("[green]✅ Chrome запущен![/green]")
+            console.print("[green]✅ Браузер запущен![/green]")
         except Exception as e:
-            console.print(f"[red]Ошибка запуска Chrome: {e}[/red]")
-            console.print("\n[yellow]Попробуй:[/yellow]")
-            console.print("1. Убедись что Chrome полностью закрыт (проверь Task Manager)")
-            console.print("2. Или запусти скрипт от имени администратора")
+            console.print(f"[red]Ошибка: {e}[/red]")
             return
         
         page = browser.pages[0] if browser.pages else await browser.new_page()
         
-        # Переходим на VK Dating
+        # Переходим на VK
+        console.print("\n🌐 Открываю VK...")
+        await page.goto("https://vk.com")
+        await asyncio.sleep(3)
+        
+        # Проверяем залогинены ли
+        content = await page.content()
+        if "Войти" in content or "войти" in content.lower():
+            console.print("\n[yellow]⚠️  Нужна авторизация![/yellow]")
+            console.print("Залогинься в VK в открытом браузере и нажми Enter...")
+            input()
+        
+        # Переходим на Dating
         console.print("\n💕 Открываю VK Dating...")
-        try:
-            await page.goto("https://vk.com/dating", timeout=30000)
-            console.print("[green]✅ Страница открыта![/green]")
-        except Exception as e:
-            console.print(f"[yellow]⚠️ Таймаут загрузки, но продолжаем: {e}[/yellow]")
+        await page.goto("https://vk.com/dating")
         
         console.print("⏳ Ожидание загрузки...")
         for i in range(10):
@@ -80,16 +121,16 @@ async def main():
         
         # Скриншот
         console.print("\n📸 Делаю скриншот...")
-        await page.screenshot(path=str(OUTPUT_DIR / "chrome_dating.png"))
-        console.print(f"[green]✅ Скриншот: {OUTPUT_DIR / 'chrome_dating.png'}[/green]")
+        await page.screenshot(path=str(OUTPUT_DIR / "dating.png"))
+        console.print(f"[green]✅ Скриншот: {OUTPUT_DIR / 'dating.png'}[/green]")
         
         # HTML
         console.print("📄 Сохраняю HTML...")
         html = await page.content()
-        (OUTPUT_DIR / "chrome_dating.html").write_text(html, encoding="utf-8")
-        console.print(f"[green]✅ HTML: {OUTPUT_DIR / 'chrome_dating.html'}[/green]")
+        (OUTPUT_DIR / "dating.html").write_text(html, encoding="utf-8")
+        console.print(f"[green]✅ HTML: {OUTPUT_DIR / 'dating.html'}[/green]")
         
-        # Извлекаем классы
+        # Классы
         console.print("\n📋 Извлечение CSS классов...")
         classes = await page.evaluate("""
             () => {
@@ -102,7 +143,6 @@ async def main():
             }
         """)
         
-        # Фильтруем интересные
         interesting = [c for c in classes if any(kw in c.lower() for kw in 
             ["dating", "card", "profile", "user", "like", "skip", "swipe", 
              "photo", "chat", "message", "boost", "match", "action", "dialog",
@@ -112,28 +152,20 @@ async def main():
         for cls in interesting[:30]:
             console.print(f"  .{cls}")
         
-        # Сохраняем отчёт
+        # Сохраняем
         report = {
             "timestamp": datetime.now().isoformat(),
             "url": page.url,
             "all_classes": classes,
             "interesting_classes": interesting
         }
+        (OUTPUT_DIR / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
+        console.print(f"\n💾 Отчёт: {OUTPUT_DIR / 'report.json'}")
         
-        report_path = OUTPUT_DIR / "chrome_report.json"
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2))
-        console.print(f"\n💾 Отчёт: {report_path}")
-        
-        # Интерактивный режим
+        # Интерактив
         console.print("\n" + "="*50)
         console.print("[bold cyan]🎮 ИНТЕРАКТИВНЫЙ РЕЖИМ[/bold cyan]")
-        console.print("="*50)
-        console.print("Команды:")
-        console.print("  [green]s[/green] = скриншот")
-        console.print("  [green]c[/green] = показать классы")
-        console.print("  [green]h[/green] = сохранить HTML")
-        console.print("  [green]q[/green] = выйти")
-        console.print("\nКликай в браузере, потом вводи команды здесь")
+        console.print("  [green]s[/green]=скриншот  [green]c[/green]=классы  [green]h[/green]=html  [green]q[/green]=выход")
         console.print("="*50)
         
         while True:
@@ -172,8 +204,6 @@ async def main():
                 console.print(f"\n[cyan]Интересные классы ({len(interesting)}):[/cyan]")
                 for cls in interesting[:40]:
                     console.print(f"  .{cls}")
-            else:
-                console.print("[yellow]Неизвестная команда. Используй: s, c, h, q[/yellow]")
         
         console.print("\n👋 Закрываю...")
         await browser.close()
