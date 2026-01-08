@@ -52,8 +52,10 @@ async def main():
                     "--start-maximized",
                     "--profile-directory=Default"  # Основной профиль
                 ],
-                viewport={"width": 1920, "height": 1080}
+                viewport={"width": 1920, "height": 1080},
+                timeout=60000  # 60 секунд на запуск
             )
+            console.print("[green]✅ Chrome запущен![/green]")
         except Exception as e:
             console.print(f"[red]Ошибка запуска Chrome: {e}[/red]")
             console.print("\n[yellow]Попробуй:[/yellow]")
@@ -65,19 +67,27 @@ async def main():
         
         # Переходим на VK Dating
         console.print("\n💕 Открываю VK Dating...")
-        await page.goto("https://vk.com/dating")
+        try:
+            await page.goto("https://vk.com/dating", timeout=30000)
+            console.print("[green]✅ Страница открыта![/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Таймаут загрузки, но продолжаем: {e}[/yellow]")
         
-        console.print("⏳ Ожидание загрузки (20 сек)...")
-        await asyncio.sleep(20)
+        console.print("⏳ Ожидание загрузки...")
+        for i in range(10):
+            await asyncio.sleep(2)
+            console.print(f"   {(i+1)*2} сек...")
         
         # Скриншот
+        console.print("\n📸 Делаю скриншот...")
         await page.screenshot(path=str(OUTPUT_DIR / "chrome_dating.png"))
-        console.print(f"📸 Скриншот: {OUTPUT_DIR / 'chrome_dating.png'}")
+        console.print(f"[green]✅ Скриншот: {OUTPUT_DIR / 'chrome_dating.png'}[/green]")
         
         # HTML
+        console.print("📄 Сохраняю HTML...")
         html = await page.content()
         (OUTPUT_DIR / "chrome_dating.html").write_text(html, encoding="utf-8")
-        console.print(f"📄 HTML: {OUTPUT_DIR / 'chrome_dating.html'}")
+        console.print(f"[green]✅ HTML: {OUTPUT_DIR / 'chrome_dating.html'}[/green]")
         
         # Извлекаем классы
         console.print("\n📋 Извлечение CSS классов...")
@@ -115,12 +125,22 @@ async def main():
         console.print(f"\n💾 Отчёт: {report_path}")
         
         # Интерактивный режим
-        console.print("\n[bold cyan]🎮 Интерактивный режим[/bold cyan]")
-        console.print("Команды: [green]s[/green]=screenshot, [green]c[/green]=classes, [green]h[/green]=html, [green]q[/green]=quit")
-        console.print("Кликай в браузере, переходи на разные табы, потом делай screenshot")
+        console.print("\n" + "="*50)
+        console.print("[bold cyan]🎮 ИНТЕРАКТИВНЫЙ РЕЖИМ[/bold cyan]")
+        console.print("="*50)
+        console.print("Команды:")
+        console.print("  [green]s[/green] = скриншот")
+        console.print("  [green]c[/green] = показать классы")
+        console.print("  [green]h[/green] = сохранить HTML")
+        console.print("  [green]q[/green] = выйти")
+        console.print("\nКликай в браузере, потом вводи команды здесь")
+        console.print("="*50)
         
         while True:
-            cmd = input("\n> ").strip().lower()
+            try:
+                cmd = input("\n> ").strip().lower()
+            except EOFError:
+                break
             
             if cmd == "q":
                 break
@@ -128,13 +148,13 @@ async def main():
                 ts = datetime.now().strftime("%H%M%S")
                 path = OUTPUT_DIR / f"screen_{ts}.png"
                 await page.screenshot(path=str(path))
-                console.print(f"📸 {path}")
+                console.print(f"[green]📸 {path}[/green]")
             elif cmd == "h":
                 ts = datetime.now().strftime("%H%M%S")
                 path = OUTPUT_DIR / f"html_{ts}.html"
                 html = await page.content()
                 path.write_text(html, encoding="utf-8")
-                console.print(f"📄 {path}")
+                console.print(f"[green]📄 {path}[/green]")
             elif cmd == "c":
                 classes = await page.evaluate("""
                     () => {
@@ -152,6 +172,8 @@ async def main():
                 console.print(f"\n[cyan]Интересные классы ({len(interesting)}):[/cyan]")
                 for cls in interesting[:40]:
                     console.print(f"  .{cls}")
+            else:
+                console.print("[yellow]Неизвестная команда. Используй: s, c, h, q[/yellow]")
         
         console.print("\n👋 Закрываю...")
         await browser.close()
