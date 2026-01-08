@@ -69,24 +69,29 @@ async def test_vk_dating():
         """)
         
         page = await context.new_page()
-        page.set_default_timeout(5000)  # Уменьшаем таймаут для быстрого фидбека
         
-        # Переходим на Dating
+        # Переходим на Dating (большой таймаут для навигации)
         print("📱 Открываем m.vk.com/dating...")
-        await page.goto("https://m.vk.com/dating", wait_until="domcontentloaded")
+        await page.goto("https://m.vk.com/dating", wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(2)
+        
+        # Теперь ставим короткий таймаут для интерактивных команд
+        page.set_default_timeout(5000)
         
         # Проверяем нужен ли вход в Dating
         current_url = page.url
         print(f"📍 Текущий URL: {current_url}")
         
         # Ищем кнопку входа
-        enter_btn = page.locator(VKSelectors.BTN_ENTER_DATING).first
-        if await enter_btn.is_visible():
-            print("🔑 Требуется вход в Dating...")
-            await enter_btn.click()
-            print("⏳ Ждём загрузки анкет...")
-            await asyncio.sleep(3)
+        try:
+            enter_btn = page.locator(VKSelectors.BTN_ENTER_DATING).first
+            if await enter_btn.is_visible():
+                print("🔑 Требуется вход в Dating...")
+                await enter_btn.click()
+                print("⏳ Ждём загрузки анкет...")
+                await asyncio.sleep(3)
+        except:
+            pass
         
         # Ждём появления кнопок действий
         print("🔍 Ищем кнопки...")
@@ -140,16 +145,12 @@ async def test_vk_dating():
         
         # Ищем имя профиля
         print("\n🔍 Ищем имя профиля...")
-        name_found = False
-        name_text = ""
         
         # Ищем текст с паттерном "Имя, возраст"
         all_text = await page.locator('body').inner_text()
         match = re.search(r'([А-Яа-яЁё]+),\s*(\d{2})', all_text)
         if match:
-            name_text = f"{match.group(1)}, {match.group(2)}"
-            print(f"   👤 Найдено: {name_text}")
-            name_found = True
+            print(f"   👤 Найдено: {match.group(1)}, {match.group(2)}")
         
         # Интерактивный режим
         print("\n" + "="*50)
