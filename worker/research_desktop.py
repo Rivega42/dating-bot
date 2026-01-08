@@ -1,23 +1,36 @@
 """
-Исследование DOM десктопной версии VK Dating
+Полное исследование DOM VK Dating (десктоп)
+Сохраняет все селекторы в файл VK_DESKTOP_SELECTORS.md
+
 Запуск: py research_desktop.py
 """
 import asyncio
 import os
 import json
+from datetime import datetime
+
 from playwright.async_api import async_playwright
 
 
 async def research_vk_dating():
-    """Исследует DOM vk.com/dating"""
+    """Исследует DOM vk.com/dating и сохраняет селекторы"""
     
-    print("🔬 Исследование VK Dating (десктоп)...")
+    print("🔬 Полное исследование VK Dating...")
     
     session_path = os.path.join(os.path.dirname(__file__), "vk_session.json")
     
     if not os.path.exists(session_path):
         print("❌ Сначала запустите: py auth_vk.py")
         return
+    
+    results = {
+        "date": datetime.now().isoformat(),
+        "tabs": [],
+        "action_buttons": [],
+        "profile_selectors": [],
+        "keyboard_shortcuts": {},
+        "navigation": []
+    }
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -27,7 +40,7 @@ async def research_vk_dating():
         
         context = await browser.new_context(
             viewport={"width": 1280, "height": 900},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             locale="ru-RU",
             timezone_id="Europe/Moscow",
             storage_state=session_path
@@ -48,264 +61,348 @@ async def research_vk_dating():
         print("🔬 ИССЛЕДОВАНИЕ DOM")
         print("="*60)
         
-        # 1. Исследуем кнопки действий
-        print("\n📍 1. КНОПКИ ДЕЙСТВИЙ (лайк/скип/суперлайк)")
-        buttons_info = await page.evaluate('''
+        # ============================================
+        # 1. ВКЛАДКИ (Анкеты, Лайки, Чаты, Профиль)
+        # ============================================
+        print("\n📍 1. ВКЛАДКИ")
+        tabs_data = await page.evaluate('''
             (() => {
                 const results = [];
-                // Ищем кнопки в области карточки
+                const tabTexts = ['Анкеты', 'Лайки', 'Чаты', 'Профиль'];
+                
+                // Ищем все кликабельные элементы
+                document.querySelectorAll('a, div, span, button').forEach(el => {
+                    const text = el.innerText?.trim();
+                    if (!text) return;
+                    
+                    tabTexts.forEach(tabName => {
+                        // Точное совпадение или начинается с
+                        if (text === tabName || text.startsWith(tabName + ' ')) {
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0) {
+                                results.push({
+                                    name: tabName,
+                                    tag: el.tagName,
+                                    class: el.className?.slice(0, 80) || '',
+                                    id: el.id || '',
+                                    href: el.href || '',
+                                    text: text.slice(0, 30),
+                                    rect: {x: rect.x, y: rect.y, w: rect.width, h: rect.height}
+                                });
+                            }
+                        }
+                    });
+                });
+                
+                return results;
+            })()
+        ''')
+        
+        for tab in tabs_data:
+            print(f"  [{tab['name']}] {tab['tag']} class='{tab['class'][:40]}' href='{tab['href']}'")
+        results["tabs"] = tabs_data
+        
+        # ============================================
+        # 2. КНОПКИ ДЕЙСТВИЙ (Лайк, Дизлайк, Суперлайк)
+        # ============================================
+        print("\n📍 2. КНОПКИ ДЕЙСТВИЙ")
+        buttons_data = await page.evaluate('''
+            (() => {
+                const results = [];
                 const buttons = document.querySelectorAll('button');
-                buttons.forEach((btn, i) => {
+                
+                buttons.forEach((btn, idx) => {
                     const rect = btn.getBoundingClientRect();
-                    // Фильтруем кнопки в нижней части (где обычно лайк/скип)
-                    if (rect.bottom > 600 && rect.width > 50 && rect.width < 200) {
+                    const style = getComputedStyle(btn);
+                    
+                    // Кнопки в нижней части карточки (y > 500) и видимые
+                    if (rect.y > 400 && rect.width > 40 && rect.height > 40 && rect.width < 200) {
+                        const svgIcons = Array.from(btn.querySelectorAll('svg, [class*="Icon"]'))
+                            .map(s => s.className?.baseVal || s.className || '').join(', ');
+                        
                         results.push({
-                            index: i,
-                            class: btn.className,
-                            ariaLabel: btn.getAttribute('aria-label'),
-                            title: btn.title,
-                            innerHTML: btn.innerHTML.slice(0, 100),
-                            rect: {x: rect.x, y: rect.y, w: rect.width, h: rect.height}
+                            index: idx,
+                            class: btn.className?.slice(0, 80) || '',
+                            ariaLabel: btn.getAttribute('aria-label') || '',
+                            title: btn.title || '',
+                            bgColor: style.backgroundColor,
+                            icons: svgIcons.slice(0, 100),
+                            rect: {x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height)}
                         });
+                    }
+                });
+                
+                // Сортируем по X (слева направо)
+                return results.sort((a, b) => a.rect.x - b.rect.x);
+            })()
+        ''')
+        
+        for i, btn in enumerate(buttons_data):
+            position = ['ЛЕВАЯ (Дизлайк)', 'СРЕДНЯЯ (Суперлайк)', 'ПРАВАЯ (Лайк)'][i] if i < 3 else f'Кнопка {i}'
+            print(f"  {position}:")
+            print(f"    class: {btn['class'][:50]}")
+            print(f"    aria-label: {btn['ariaLabel']}")
+            print(f"    bgColor: {btn['bgColor']}")
+            print(f"    pos: x={btn['rect']['x']}, y={btn['rect']['y']}")
+        results["action_buttons"] = buttons_data
+        
+        # ============================================
+        # 3. ДАННЫЕ ПРОФИЛЯ
+        # ============================================
+        print("\n📍 3. ДАННЫЕ ПРОФИЛЯ")
+        profile_data = await page.evaluate('''
+            (() => {
+                const results = {
+                    name_age: null,
+                    sections: [],
+                    all_text_blocks: []
+                };
+                
+                // Ищем имя и возраст (обычно крупный заголовок)
+                document.querySelectorAll('h1, h2, h3, [class*="Title"], [class*="Name"], [class*="header"]').forEach(el => {
+                    const text = el.innerText?.trim();
+                    if (text && /^[А-Яа-яЁё]+,\\s*\\d{2}$/.test(text)) {
+                        results.name_age = {
+                            text: text,
+                            tag: el.tagName,
+                            class: el.className?.slice(0, 80) || ''
+                        };
+                    }
+                });
+                
+                // Ищем секции профиля
+                const sectionNames = ['Личное', 'Работа', 'Интересы', 'Я ищу', 'О себе'];
+                document.querySelectorAll('*').forEach(el => {
+                    const text = el.innerText?.trim();
+                    if (!text) return;
+                    
+                    sectionNames.forEach(section => {
+                        if (text.startsWith(section) && text.length < 200) {
+                            results.sections.push({
+                                section: section,
+                                text: text.slice(0, 150),
+                                tag: el.tagName,
+                                class: el.className?.slice(0, 60) || ''
+                            });
+                        }
+                    });
+                });
+                
+                // Ищем все текстовые блоки в области профиля (справа от фото)
+                document.querySelectorAll('div, span, p').forEach(el => {
+                    const rect = el.getBoundingClientRect();
+                    const text = el.innerText?.trim();
+                    // Справа от центра экрана, в видимой области
+                    if (rect.x > 600 && rect.y > 100 && rect.y < 800 && text && text.length > 5 && text.length < 100) {
+                        results.all_text_blocks.push({
+                            text: text.slice(0, 80),
+                            tag: el.tagName,
+                            class: el.className?.slice(0, 50) || '',
+                            rect: {x: Math.round(rect.x), y: Math.round(rect.y)}
+                        });
+                    }
+                });
+                
+                // Убираем дубли
+                results.all_text_blocks = results.all_text_blocks.filter((v, i, a) => 
+                    a.findIndex(t => t.text === v.text) === i
+                ).slice(0, 20);
+                
+                return results;
+            })()
+        ''')
+        
+        if profile_data['name_age']:
+            print(f"  Имя/возраст: {profile_data['name_age']['text']}")
+            print(f"    selector: {profile_data['name_age']['tag']}.{profile_data['name_age']['class'][:30]}")
+        
+        print(f"\n  Секции профиля:")
+        for sec in profile_data['sections'][:5]:
+            print(f"    [{sec['section']}] {sec['text'][:50]}...")
+        
+        print(f"\n  Текстовые блоки (первые 10):")
+        for block in profile_data['all_text_blocks'][:10]:
+            print(f"    {block['text'][:40]}... ({block['tag']})")
+        
+        results["profile_selectors"] = profile_data
+        
+        # ============================================
+        # 4. ГОРЯЧИЕ КЛАВИШИ
+        # ============================================
+        print("\n📍 4. ГОРЯЧИЕ КЛАВИШИ (из DOM)")
+        shortcuts = await page.evaluate('''
+            (() => {
+                // Ищем элементы с подсказками клавиш
+                const results = {};
+                document.querySelectorAll('*').forEach(el => {
+                    const text = el.innerText?.trim();
+                    if (text && text.length < 30) {
+                        if (text.includes('Дизлайк')) results['dislike'] = text;
+                        if (text.includes('Суперлайк')) results['superlike'] = text;
+                        if (text.includes('Лайк') && !text.includes('Дизлайк') && !text.includes('Суперлайк')) results['like'] = text;
+                        if (text.includes('Предыдущее')) results['prev_photo'] = text;
+                        if (text.includes('Следующее')) results['next_photo'] = text;
                     }
                 });
                 return results;
             })()
         ''')
-        for btn in buttons_info:
-            print(f"  Button: class={btn['class'][:50]}, aria={btn['ariaLabel']}, title={btn['title']}")
-            print(f"    pos: x={btn['rect']['x']:.0f}, y={btn['rect']['y']:.0f}, w={btn['rect']['w']:.0f}")
         
-        # 2. Исследуем вкладки
-        print("\n📍 2. ВКЛАДКИ (Анкеты, Лайки, Чаты, Профиль)")
-        tabs_info = await page.evaluate('''
-            (() => {
-                const results = [];
-                // Ищем элементы с текстом вкладок
-                const elements = document.querySelectorAll('a, button, div, span');
-                const tabNames = ['Анкеты', 'Лайки', 'Чаты', 'Профиль'];
-                elements.forEach(el => {
-                    tabNames.forEach(name => {
-                        if (el.innerText && el.innerText.includes(name) && el.innerText.length < 30) {
-                            results.push({
-                                tag: el.tagName,
-                                class: el.className.slice(0, 60),
-                                text: el.innerText.slice(0, 30),
-                                href: el.href || ''
-                            });
-                        }
-                    });
-                });
-                return results.slice(0, 12);
-            })()
-        ''')
-        for tab in tabs_info:
-            print(f"  {tab['tag']}: class={tab['class']}, text='{tab['text']}', href={tab['href']}")
+        print(f"  Найденные подсказки: {shortcuts}")
+        results["keyboard_shortcuts"] = {
+            "dislike": ", (запятая / Б)",
+            "like": ". (точка / Ю)", 
+            "superlike": "/ (слеш)",
+            "prev_photo": "ArrowLeft",
+            "next_photo": "ArrowRight"
+        }
         
-        # 3. Исследуем данные профиля
-        print("\n📍 3. ДАННЫЕ ПРОФИЛЯ (имя, возраст, инфо)")
-        profile_info = await page.evaluate('''
-            (() => {
-                const text = document.body.innerText;
-                // Ищем паттерн "Имя, возраст"
-                const nameMatch = text.match(/([А-Яа-яЁё]+),\\s*(\\d{2})/);
-                
-                // Ищем секции
-                const sections = {};
-                ['Личное', 'Работа', 'Интересы', 'Я ищу'].forEach(section => {
-                    const idx = text.indexOf(section);
-                    if (idx > -1) {
-                        sections[section] = text.slice(idx, idx + 100).replace(/\\n/g, ' ');
-                    }
-                });
-                
-                return {
-                    name: nameMatch ? nameMatch[1] : null,
-                    age: nameMatch ? nameMatch[2] : null,
-                    sections: sections
-                };
-            })()
-        ''')
-        print(f"  Имя: {profile_info['name']}, Возраст: {profile_info['age']}")
-        for section, content in profile_info['sections'].items():
-            print(f"  {section}: {content[:60]}...")
+        # ============================================
+        # 5. ТЕСТ КЛАВИШ
+        # ============================================
+        print("\n📍 5. ТЕСТ ГОРЯЧИХ КЛАВИШ")
         
-        # 4. Тестируем горячие клавиши
-        print("\n📍 4. ТЕСТ ГОРЯЧИХ КЛАВИШ")
-        print("  Попробуем нажать клавиши...")
+        # Активируем страницу
+        await page.click('body')
+        await asyncio.sleep(0.5)
         
-        # Сохраняем текущее имя
-        initial_name = profile_info['name']
-        
-        # Нажимаем стрелку вправо (следующее фото)
+        # Тест стрелок
+        print("  Тестирую ArrowRight...")
         await page.keyboard.press('ArrowRight')
         await asyncio.sleep(0.5)
-        print("  → ArrowRight (следующее фото)")
+        print("  ✅ ArrowRight отправлен")
         
+        print("  Тестирую ArrowLeft...")
         await page.keyboard.press('ArrowLeft')
         await asyncio.sleep(0.5)
-        print("  ← ArrowLeft (предыдущее фото)")
+        print("  ✅ ArrowLeft отправлен")
         
-        # 5. Ищем селекторы для кнопок
-        print("\n📍 5. ПОИСК СЕЛЕКТОРОВ КНОПОК")
-        
-        # Красная кнопка (дизлайк/скип)
-        skip_selector = await page.evaluate('''
-            (() => {
-                const buttons = document.querySelectorAll('button');
-                for (let btn of buttons) {
-                    const style = getComputedStyle(btn);
-                    const bgColor = style.backgroundColor;
-                    // Красная кнопка
-                    if (bgColor.includes('rgb(255') || bgColor.includes('rgb(239') || 
-                        btn.className.includes('dislike') || btn.className.includes('skip') ||
-                        btn.innerHTML.includes('cancel') || btn.innerHTML.includes('close')) {
-                        return {
-                            found: true,
-                            class: btn.className,
-                            selector: btn.className.split(' ')[0] ? '.' + btn.className.split(' ')[0] : null
-                        };
-                    }
-                }
-                return {found: false};
-            })()
-        ''')
-        print(f"  Skip/Dislike: {skip_selector}")
-        
-        # Фиолетовая кнопка (лайк)
-        like_selector = await page.evaluate('''
-            (() => {
-                const buttons = document.querySelectorAll('button');
-                for (let btn of buttons) {
-                    const style = getComputedStyle(btn);
-                    const bgColor = style.backgroundColor;
-                    // Фиолетовая кнопка
-                    if (bgColor.includes('rgb(137') || bgColor.includes('rgb(138') ||
-                        btn.className.includes('like') || 
-                        btn.innerHTML.includes('like') || btn.innerHTML.includes('heart')) {
-                        return {
-                            found: true,
-                            class: btn.className,
-                            bgColor: bgColor
-                        };
-                    }
-                }
-                return {found: false};
-            })()
-        ''')
-        print(f"  Like: {like_selector}")
-        
-        # 6. Проверяем работу клавиш для лайка
-        print("\n📍 6. ТЕСТ КЛАВИШ ДЕЙСТВИЙ")
-        print("  Нажмите в браузере на карточку, чтобы активировать окно")
-        input("  Затем нажмите Enter здесь для теста клавиши '3' (лайк)...")
-        
-        # Кликаем на карточку чтобы активировать
-        try:
-            await page.click('body')
-            await asyncio.sleep(0.3)
-        except:
-            pass
-        
-        # Пробуем разные клавиши
-        keys_to_test = [
-            ('1', 'Дизлайк'),
-            ('2', 'Суперлайк'),
-            ('3', 'Лайк'),
-            ('ArrowLeft', 'Предыдущее фото'),
-            ('ArrowRight', 'Следующее фото'),
-        ]
-        
-        print("\n  Какую клавишу протестировать?")
-        for i, (key, desc) in enumerate(keys_to_test):
-            print(f"    {i+1}. {key} - {desc}")
-        
-        choice = input("  Введите номер (или 'q' для выхода): ").strip()
-        
-        if choice.isdigit() and 1 <= int(choice) <= len(keys_to_test):
-            key, desc = keys_to_test[int(choice)-1]
-            print(f"\n  Нажимаю '{key}' ({desc})...")
-            await page.keyboard.press(key)
-            await asyncio.sleep(1)
-            
-            # Проверяем изменилось ли имя
-            new_profile = await page.evaluate('''
-                (() => {
-                    const text = document.body.innerText;
-                    const nameMatch = text.match(/([А-Яа-яЁё]+),\\s*(\\d{2})/);
-                    return nameMatch ? nameMatch[1] + ', ' + nameMatch[2] : null;
-                })()
-            ''')
-            print(f"  Текущая карточка: {new_profile}")
-            if new_profile != f"{initial_name}, {profile_info['age']}":
-                print(f"  ✅ Карточка изменилась! Клавиша работает!")
-            else:
-                print(f"  ⚠️ Карточка не изменилась")
-        
-        # 7. Интерактивный режим
+        # ============================================
+        # СОХРАНЯЕМ РЕЗУЛЬТАТЫ
+        # ============================================
         print("\n" + "="*60)
-        print("🎮 ИНТЕРАКТИВНЫЙ ТЕСТ")
-        print("="*60)
-        print("Команды:")
-        print("  1 - Дизлайк (клавиша 1)")
-        print("  2 - Суперлайк (клавиша 2)")
-        print("  3 - Лайк (клавиша 3)")
-        print("  4 - Предыдущее фото")
-        print("  5 - Следующее фото")
-        print("  p - Парсить профиль")
-        print("  t - Перейти на вкладку (Анкеты/Лайки/Чаты/Профиль)")
-        print("  q - Выход")
+        print("💾 СОХРАНЕНИЕ РЕЗУЛЬТАТОВ")
         print("="*60)
         
-        while True:
-            cmd = input("\n> ").strip().lower()
-            
-            if cmd == 'q':
-                break
-            elif cmd == '1':
-                await page.keyboard.press('1')
-                print("❌ Дизлайк!")
-                await asyncio.sleep(1)
-            elif cmd == '2':
-                await page.keyboard.press('2')
-                print("🔥 Суперлайк!")
-                await asyncio.sleep(1)
-            elif cmd == '3':
-                await page.keyboard.press('3')
-                print("❤️ Лайк!")
-                await asyncio.sleep(1)
-            elif cmd == '4':
-                await page.keyboard.press('ArrowLeft')
-                print("⬅️ Предыдущее фото")
-            elif cmd == '5':
-                await page.keyboard.press('ArrowRight')
-                print("➡️ Следующее фото")
-            elif cmd == 'p':
-                profile = await page.evaluate('''
-                    (() => {
-                        const text = document.body.innerText;
-                        const nameMatch = text.match(/([А-Яа-яЁё]+),\\s*(\\d{2})/);
-                        return {
-                            name: nameMatch ? nameMatch[1] : null,
-                            age: nameMatch ? nameMatch[2] : null,
-                            fullText: text.slice(0, 500)
-                        };
-                    })()
-                ''')
-                print(f"👤 {profile['name']}, {profile['age']}")
-            elif cmd == 't':
-                tab = input("  Какая вкладка? (1=Анкеты, 2=Лайки, 3=Чаты, 4=Профиль): ").strip()
-                tab_names = {'1': 'Анкеты', '2': 'Лайки', '3': 'Чаты', '4': 'Профиль'}
-                if tab in tab_names:
-                    await page.evaluate(f'''
-                        document.querySelectorAll('a, div, span').forEach(el => {{
-                            if (el.innerText && el.innerText.trim() === '{tab_names[tab]}') {{
-                                el.click();
-                            }}
-                        }});
-                    ''')
-                    print(f"📑 Переход на '{tab_names[tab]}'...")
-                    await asyncio.sleep(1)
+        # Создаём Markdown документацию
+        md_content = f"""# VK Dating Desktop - Селекторы
+
+Сгенерировано: {results['date']}
+
+## Горячие клавиши
+
+| Действие | Клавиша | Playwright |
+|----------|---------|------------|
+| Дизлайк | < (Б / ,) | `page.keyboard.press(',')` |
+| Лайк | > (Ю / .) | `page.keyboard.press('.')` |
+| Суперлайк | / | `page.keyboard.press('/')` |
+| Предыдущее фото | ← | `page.keyboard.press('ArrowLeft')` |
+| Следующее фото | → | `page.keyboard.press('ArrowRight')` |
+
+## Вкладки
+
+"""
+        for tab in tabs_data[:4]:
+            md_content += f"### {tab['name']}\n"
+            md_content += f"- Tag: `{tab['tag']}`\n"
+            md_content += f"- Class: `{tab['class'][:60]}`\n"
+            md_content += f"- Href: `{tab['href']}`\n\n"
+        
+        md_content += """## Кнопки действий
+
+"""
+        for i, btn in enumerate(buttons_data[:3]):
+            names = ['Дизлайк (красная)', 'Суперлайк (оранжевая)', 'Лайк (фиолетовая)']
+            md_content += f"### {names[i] if i < 3 else f'Кнопка {i}'}\n"
+            md_content += f"- Class: `{btn['class'][:60]}`\n"
+            md_content += f"- aria-label: `{btn['ariaLabel']}`\n"
+            md_content += f"- Position: x={btn['rect']['x']}, y={btn['rect']['y']}\n\n"
+        
+        md_content += """## Парсинг профиля
+
+```python
+# Имя и возраст
+"""
+        if profile_data['name_age']:
+            md_content += f"# Селектор: {profile_data['name_age']['tag']}, class содержит: {profile_data['name_age']['class'][:40]}\n"
+        
+        md_content += """
+import re
+
+async def parse_profile(page):
+    # Метод 1: Через регулярку по всему тексту
+    all_text = await page.locator('body').inner_text()
+    match = re.search(r'([А-Яа-яЁё]+),\\s*(\\d{2})', all_text)
+    if match:
+        name, age = match.group(1), match.group(2)
+    
+    # Метод 2: Через evaluate (более надёжно)
+    data = await page.evaluate('''
+        (() => {
+            const text = document.body.innerText;
+            const match = text.match(/([А-Яа-яЁё]+),\\s*(\\d{2})/);
+            return match ? {name: match[1], age: match[2]} : null;
+        })()
+    ''')
+    return data
+```
+
+## Переход по вкладкам
+
+```python
+async def go_to_tab(page, tab_name):
+    # tab_name: 'Анкеты', 'Лайки', 'Чаты', 'Профиль'
+    await page.evaluate(f'''
+        document.querySelectorAll('a, div, span').forEach(el => {{
+            if (el.innerText?.trim() === '{tab_name}' || el.innerText?.startsWith('{tab_name} ')) {{
+                el.click();
+            }}
+        }});
+    ''')
+```
+
+## Полный пример
+
+```python
+import asyncio
+from playwright.async_api import async_playwright
+
+async def vk_dating_bot():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context(storage_state="vk_session.json")
+        page = await context.new_page()
+        
+        await page.goto("https://vk.com/dating")
+        await asyncio.sleep(3)
+        
+        # Активируем окно
+        await page.click('body')
+        
+        # Лайк
+        await page.keyboard.press('.')
+        
+        # Дизлайк
+        await page.keyboard.press(',')
+        
+        # Листать фото
+        await page.keyboard.press('ArrowRight')
+        await page.keyboard.press('ArrowLeft')
+```
+"""
+        
+        # Сохраняем MD
+        md_path = os.path.join(os.path.dirname(__file__), "..", "research", "VK_DESKTOP_SELECTORS.md")
+        os.makedirs(os.path.dirname(md_path), exist_ok=True)
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+        print(f"  ✅ Сохранено: {md_path}")
+        
+        # Сохраняем JSON
+        json_path = os.path.join(os.path.dirname(__file__), "..", "research", "vk_desktop_dom.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        print(f"  ✅ Сохранено: {json_path}")
         
         # Сохраняем сессию
         storage = await context.storage_state()
@@ -313,7 +410,7 @@ async def research_vk_dating():
             json.dump(storage, f, ensure_ascii=False, indent=2)
         
         await browser.close()
-        print("✅ Исследование завершено!")
+        print("\n✅ Исследование завершено!")
 
 
 if __name__ == "__main__":
