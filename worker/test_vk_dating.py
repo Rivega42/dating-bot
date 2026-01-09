@@ -1,6 +1,6 @@
 """
 Тестовый скрипт для VK Dating (десктоп)
-Использует селекторы из vk_selectors.py
+Использует селекторы из vk_selectors.py + playwright-stealth
 
 Горячие клавиши VK:
   , (Б) - Дизлайк
@@ -16,6 +16,13 @@ import json
 
 from playwright.async_api import async_playwright, Page, FrameLocator
 from vk_selectors import VKDatingSelectors as S, VKDatingHotkeys as K
+
+# Опциональный stealth
+try:
+    from playwright_stealth import stealth_async
+    HAS_STEALTH = True
+except ImportError:
+    HAS_STEALTH = False
 
 
 class VKDatingTester:
@@ -94,7 +101,6 @@ class VKDatingTester:
             if await btn.count() > 0:
                 await btn.click()
                 await asyncio.sleep(0.5)
-                # Подтверждение в попапе
                 confirm = self.get_locator(S.BTN_SEND_SUPERLIKE)
                 if await confirm.count() > 0:
                     await confirm.click()
@@ -106,17 +112,14 @@ class VKDatingTester:
         await asyncio.sleep(0.8)
     
     async def photo_next(self):
-        """Следующее фото"""
         await self.page.keyboard.press(K.PHOTO_NEXT)
         print("➡️ Следующее фото")
     
     async def photo_prev(self):
-        """Предыдущее фото"""
         await self.page.keyboard.press(K.PHOTO_PREV)
         print("⬅️ Предыдущее фото")
     
     async def go_to_tab(self, tab_name: str):
-        """Переходит на вкладку"""
         tabs = {
             'cards': S.TAB_CARDS,
             'likes': S.TAB_LIKES,
@@ -138,7 +141,6 @@ class VKDatingTester:
                     print(f"📑 {tab_names_ru[tab_name]}")
                     await asyncio.sleep(1)
                 else:
-                    # Fallback на текст
                     await self.page.click(f'text="{tab_names_ru[tab_name]}"')
                     print(f"📑 {tab_names_ru[tab_name]} (text)")
                     await asyncio.sleep(1)
@@ -146,7 +148,6 @@ class VKDatingTester:
                 print(f"⚠️ Ошибка навигации: {e}")
     
     async def send_message(self, text: str):
-        """Отправляет сообщение в открытом чате"""
         try:
             input_el = self.get_locator(S.CHAT_INPUT)
             if await input_el.count() > 0:
@@ -158,7 +159,6 @@ class VKDatingTester:
                     await send_btn.click()
                     print(f"📨 Отправлено: {text[:30]}...")
                 else:
-                    # Enter как альтернатива
                     await self.page.keyboard.press('Enter')
                     print(f"📨 Отправлено (Enter): {text[:30]}...")
             else:
@@ -167,7 +167,6 @@ class VKDatingTester:
             print(f"⚠️ Ошибка отправки: {e}")
     
     async def open_filters(self):
-        """Открывает фильтры"""
         try:
             btn = self.get_locator(S.FILTER_BTN)
             if await btn.count() > 0:
@@ -194,7 +193,11 @@ async def test_vk_dating():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=False,
-            args=['--disable-blink-features=AutomationControlled']
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-web-security'
+            ]
         )
         
         context = await browser.new_context(
@@ -205,11 +208,19 @@ async def test_vk_dating():
             storage_state=session_path
         )
         
-        await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        """)
-        
         page = await context.new_page()
+        
+        # Применяем stealth
+        if HAS_STEALTH:
+            await stealth_async(page)
+            print("🛡️ Stealth режим активирован")
+        else:
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+                window.chrome = { runtime: {} };
+            """)
         
         print("📱 Открываем vk.com/dating...")
         await page.goto("https://vk.com/dating", wait_until="networkidle", timeout=30000)
@@ -217,15 +228,12 @@ async def test_vk_dating():
         
         print(f"📍 URL: {page.url}")
         
-        # Инициализируем тестер
         tester = VKDatingTester(page)
         await tester.detect_iframe()
         
-        # Активируем окно кликом
         await page.click('body')
         await asyncio.sleep(0.3)
         
-        # Показываем текущий профиль
         info = await tester.get_profile_info()
         if info:
             name = info.get('name', '?')
@@ -309,7 +317,6 @@ async def test_vk_dating():
                 await tester.detect_iframe()
                 print("🔄 Обновлено")
         
-        # Сохраняем сессию
         storage = await context.storage_state()
         with open(session_path, "w", encoding="utf-8") as f:
             json.dump(storage, f, ensure_ascii=False, indent=2)
