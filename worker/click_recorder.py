@@ -118,8 +118,11 @@ async def click_recorder():
         """)
         
         print("📱 Открываем vk.com/dating...")
-        await page.goto("https://vk.com/dating", wait_until="networkidle", timeout=30000)
-        await asyncio.sleep(2)
+        await page.goto("https://vk.com/dating", wait_until="domcontentloaded", timeout=60000)
+        
+        # Ждём загрузки контента
+        print("⏳ Ждём загрузку страницы...")
+        await asyncio.sleep(5)
         
         print()
         print("="*60)
