@@ -1,6 +1,6 @@
 """
-Рекордер кликов - записывает все клики в браузере
-Кликай на элементы в браузере - информация сохраняется в clicks_log.json
+Рекордер кликов - записывает клики с подписями
+После каждого клика спрашивает что это было
 
 Запуск: py click_recorder.py
 """
@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 
 
 async def click_recorder():
-    """Записывает все клики пользователя"""
+    """Записывает клики с подписями пользователя"""
     
     print("🎬 Рекордер кликов VK Dating")
     print("="*60)
@@ -25,8 +25,11 @@ async def click_recorder():
     # Загружаем предыдущие записи
     clicks_log = []
     if os.path.exists(log_path):
-        with open(log_path, "r", encoding="utf-8") as f:
-            clicks_log = json.load(f)
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                clicks_log = json.load(f)
+        except:
+            clicks_log = []
     
     if not os.path.exists(session_path):
         print("❌ Сначала запустите: py auth_vk.py")
@@ -51,48 +54,66 @@ async def click_recorder():
         # Инжектим скрипт для отслеживания кликов
         await page.add_init_script("""
             window._clickedElements = [];
+            window._clickId = 0;
             
-            document.addEventListener('click', (e) => {
-                const el = e.target;
+            document.addEventListener('mousedown', (e) => {
+                const el = document.elementFromPoint(e.clientX, e.clientY) || e.target;
                 const rect = el.getBoundingClientRect();
                 
-                // Собираем путь к элементу
+                // Собираем путь
                 let path = [];
                 let current = el;
-                while (current && current !== document.body) {
+                for (let i = 0; i < 10 && current && current !== document.body; i++) {
                     let selector = current.tagName.toLowerCase();
                     if (current.id) {
                         selector += '#' + current.id;
                     } else if (current.className && typeof current.className === 'string') {
-                        const classes = current.className.split(' ').filter(c => c && !c.includes('--')).slice(0, 2);
+                        const classes = current.className.split(' ').filter(c => c && c.length < 30).slice(0, 3);
                         if (classes.length) selector += '.' + classes.join('.');
                     }
                     path.unshift(selector);
                     current = current.parentElement;
                 }
                 
+                // Ищем ближайшую кнопку/ссылку
+                let clickable = el;
+                let search = el;
+                for (let i = 0; i < 5 && search; i++) {
+                    if (search.tagName === 'BUTTON' || search.tagName === 'A' || search.getAttribute('role') === 'button') {
+                        clickable = search;
+                        break;
+                    }
+                    search = search.parentElement;
+                }
+                
+                const clickableRect = clickable.getBoundingClientRect();
+                
+                window._clickId++;
                 const info = {
+                    id: window._clickId,
                     timestamp: new Date().toISOString(),
-                    tag: el.tagName,
-                    id: el.id || null,
-                    className: el.className || null,
-                    text: el.innerText?.slice(0, 100) || null,
-                    ariaLabel: el.getAttribute('aria-label') || null,
-                    href: el.href || null,
-                    type: el.type || null,
-                    role: el.getAttribute('role') || null,
-                    rect: {
-                        x: Math.round(rect.x),
-                        y: Math.round(rect.y),
-                        width: Math.round(rect.width),
-                        height: Math.round(rect.height)
+                    element: {
+                        tag: el.tagName,
+                        id: el.id || null,
+                        className: (typeof el.className === 'string' ? el.className : '') || null,
+                        text: el.innerText?.slice(0, 150)?.replace(/\\n/g, ' ') || null,
+                        ariaLabel: el.getAttribute('aria-label') || null,
                     },
+                    clickable: {
+                        tag: clickable.tagName,
+                        id: clickable.id || null,
+                        className: (typeof clickable.className === 'string' ? clickable.className : '') || null,
+                        text: clickable.innerText?.slice(0, 150)?.replace(/\\n/g, ' ') || null,
+                        ariaLabel: clickable.getAttribute('aria-label') || null,
+                        href: clickable.href || null,
+                    },
+                    rect: {x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height)},
+                    clickableRect: {x: Math.round(clickableRect.x), y: Math.round(clickableRect.y), width: Math.round(clickableRect.width), height: Math.round(clickableRect.height)},
                     path: path.join(' > '),
-                    outerHTML: el.outerHTML?.slice(0, 500) || null
+                    outerHTML: clickable.outerHTML?.slice(0, 800) || null
                 };
                 
                 window._clickedElements.push(info);
-                console.log('CLICK RECORDED:', info.tag, info.text?.slice(0, 30));
             }, true);
         """)
         
@@ -102,100 +123,111 @@ async def click_recorder():
         
         print()
         print("="*60)
-        print("🎬 РЕЖИМ ЗАПИСИ АКТИВЕН")
+        print("🎬 ЗАПИСЬ НАЧАЛАСЬ!")
         print("="*60)
         print()
-        print("Кликай на любые элементы в браузере!")
-        print("Каждый клик записывается автоматически.")
+        print("1. Кликни на элемент в браузере")
+        print("2. Введи название (например: btn_like, tab_chats)")
+        print("3. Повтори для всех элементов")
         print()
-        print("Что записать:")
-        print("  • Кнопки лайк/дизлайк/суперлайк")
-        print("  • Вкладки (Анкеты, Лайки, Чаты, Профиль)")
-        print("  • Имя и возраст на карточке")
-        print("  • Любые другие элементы")
+        print("Подсказки для названий:")
+        print("  btn_like      - кнопка лайка")
+        print("  btn_dislike   - кнопка дизлайка")
+        print("  btn_superlike - кнопка суперлайка")
+        print("  tab_cards     - вкладка Анкеты")
+        print("  tab_likes     - вкладка Лайки")
+        print("  tab_chats     - вкладка Чаты")
+        print("  tab_profile   - вкладка Профиль")
+        print("  profile_name  - имя на карточке")
+        print("  profile_age   - возраст")
+        print("  photo         - фото карточки")
         print()
-        print("Команды в консоли:")
-        print("  Enter  - показать записанные клики")
-        print("  s      - сохранить и показать все")
-        print("  c      - очистить текущую сессию")
-        print("  n      - добавить заметку к последнему клику")
-        print("  q      - выход с сохранением")
+        print("Введи 'q' для выхода, 's' для показа всех записей")
         print("="*60)
         
         session_clicks = []
+        click_count = 0
         
         while True:
-            cmd = input("\n[Жду клик или команду] > ").strip().lower()
+            # Ждём клик
+            print("\n⏳ Кликни на элемент в браузере...")
             
-            # Получаем новые клики из браузера
-            new_clicks = await page.evaluate("window._clickedElements.splice(0)")
+            # Polling для кликов
+            click = None
+            while not click:
+                await asyncio.sleep(0.2)
+                try:
+                    new_clicks = await page.evaluate("window._clickedElements.splice(0)")
+                    if new_clicks:
+                        click = new_clicks[-1]  # Берём последний клик
+                except:
+                    pass
             
-            if new_clicks:
-                for click in new_clicks:
-                    click['session'] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    session_clicks.append(click)
-                    clicks_log.append(click)
-                    
-                    # Выводим инфо
-                    print()
-                    print(f"  🖱️  КЛИК #{len(session_clicks)}")
-                    print(f"      Tag: {click['tag']}")
-                    print(f"      Text: {click['text'][:50] if click['text'] else '-'}")
-                    print(f"      Class: {click['className'][:60] if click['className'] else '-'}")
-                    print(f"      aria-label: {click['ariaLabel'] or '-'}")
-                    print(f"      Position: x={click['rect']['x']}, y={click['rect']['y']}")
-                    print(f"      Path: {click['path'][:80]}")
+            click_count += 1
             
-            if cmd == 'q':
+            # Показываем инфо о клике
+            print(f"\n{'='*60}")
+            print(f"🖱️  КЛИК #{click_count}")
+            print(f"{'='*60}")
+            print(f"  Tag: {click['element']['tag']}")
+            print(f"  Text: {click['element']['text'][:50] if click['element']['text'] else '-'}")
+            print(f"  Class: {click['element']['className'][:60] if click['element']['className'] else '-'}")
+            print(f"  Position: x={click['rect']['x']}, y={click['rect']['y']}")
+            
+            # Спрашиваем название
+            label = input("\n📝 Что это? (название или q/s): ").strip()
+            
+            if label.lower() == 'q':
                 break
-                
-            elif cmd == 's' or cmd == '':
-                # Показать все клики сессии
-                print(f"\n📋 Записано кликов в этой сессии: {len(session_clicks)}")
-                for i, click in enumerate(session_clicks):
-                    note = click.get('note', '')
-                    note_str = f" [{note}]" if note else ""
-                    print(f"  {i+1}. {click['tag']} | {click['text'][:30] if click['text'] else '-'}{note_str}")
-                    
-            elif cmd == 'c':
-                session_clicks = []
-                print("🗑️ Сессия очищена")
-                
-            elif cmd == 'n':
-                if session_clicks:
-                    note = input("Заметка: ").strip()
-                    session_clicks[-1]['note'] = note
-                    clicks_log[-1]['note'] = note
-                    print(f"✅ Заметка добавлена: {note}")
-                else:
-                    print("Нет кликов для заметки")
-        
-        # Сохраняем лог
-        with open(log_path, "w", encoding="utf-8") as f:
-            json.dump(clicks_log, f, ensure_ascii=False, indent=2)
-        print(f"\n💾 Сохранено {len(clicks_log)} кликов в {log_path}")
-        
-        # Сохраняем читаемый отчёт
-        report_path = os.path.join(os.path.dirname(log_path), "clicks_report.md")
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write("# VK Dating - Записанные элементы\n\n")
-            f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n")
+            elif label.lower() == 's':
+                # Показать все записи
+                print(f"\n📋 Записано элементов: {len(session_clicks)}")
+                for c in session_clicks:
+                    print(f"  • {c['label']}: {c['element']['tag']} | {c['element']['text'][:30] if c['element']['text'] else '-'}")
+                continue
+            elif label == '':
+                print("⏭️ Пропущено")
+                continue
             
-            for i, click in enumerate(clicks_log):
-                note = click.get('note', '')
-                f.write(f"## Клик {i+1}")
-                if note:
-                    f.write(f" - {note}")
-                f.write("\n\n")
-                f.write(f"- **Tag:** `{click['tag']}`\n")
-                f.write(f"- **Text:** `{click['text'][:50] if click['text'] else '-'}`\n")
-                f.write(f"- **Class:** `{click['className'][:80] if click['className'] else '-'}`\n")
-                f.write(f"- **aria-label:** `{click['ariaLabel'] or '-'}`\n")
-                f.write(f"- **Position:** x={click['rect']['x']}, y={click['rect']['y']}\n")
-                f.write(f"- **Path:** `{click['path']}`\n")
-                f.write(f"\n```html\n{click['outerHTML'][:300] if click['outerHTML'] else '-'}\n```\n\n")
+            # Сохраняем с меткой
+            click['label'] = label
+            click['session'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            session_clicks.append(click)
+            clicks_log.append(click)
+            
+            print(f"✅ Сохранено: {label}")
+            
+            # Сохраняем в файл сразу
+            with open(log_path, "w", encoding="utf-8") as f:
+                json.dump(clicks_log, f, ensure_ascii=False, indent=2)
         
-        print(f"📄 Отчёт: {report_path}")
+        # Финальный вывод
+        print(f"\n{'='*60}")
+        print(f"📋 ИТОГО ЗАПИСАНО: {len(session_clicks)} элементов")
+        print(f"{'='*60}")
+        for c in session_clicks:
+            print(f"  • {c['label']}")
+            print(f"    Tag: {c['clickable']['tag']}")
+            print(f"    Class: {c['clickable']['className'][:50] if c['clickable']['className'] else '-'}")
+            print()
+        
+        print(f"💾 Сохранено в {log_path}")
+        
+        # Генерируем Python код с селекторами
+        selectors_path = os.path.join(os.path.dirname(log_path), "selectors.py")
+        with open(selectors_path, "w", encoding="utf-8") as f:
+            f.write('"""VK Dating селекторы - сгенерировано автоматически"""\n\n')
+            f.write('class VKDatingSelectors:\n')
+            for c in session_clicks:
+                label = c['label'].upper().replace(' ', '_')
+                class_name = c['clickable']['className'] or c['element']['className'] or ''
+                first_class = class_name.split()[0] if class_name else ''
+                if first_class:
+                    f.write(f'    {label} = ".{first_class}"  # {c["clickable"]["tag"]}\n')
+                else:
+                    f.write(f'    {label} = "{c["clickable"]["tag"].lower()}"  # no class\n')
+        
+        print(f"🐍 Селекторы: {selectors_path}")
         
         # Сохраняем сессию
         storage = await context.storage_state()
