@@ -37,8 +37,21 @@ class VKDatingTester:
         try:
             iframes = await self.page.locator('iframe').count()
             if iframes > 0:
+                # Ищем iframe с VK Dating app
+                for i in range(iframes):
+                    iframe = self.page.frame_locator(f'iframe >> nth={i}')
+                    # Проверяем есть ли там кнопка лайка
+                    try:
+                        btn = iframe.locator('[aria-label="like"]')
+                        if await btn.count() > 0:
+                            self.frame = iframe
+                            print(f"📦 Найден iframe VK Dating (#{i+1} из {iframes})")
+                            return True
+                    except:
+                        pass
+                # Если не нашли по aria-label, берём первый
                 self.frame = self.page.frame_locator('iframe').first
-                print(f"📦 Найден iframe ({iframes} шт)")
+                print(f"📦 Используем первый iframe ({iframes} шт)")
                 return True
             else:
                 print("📄 Работаем без iframe")
@@ -58,27 +71,36 @@ class VKDatingTester:
         info = {}
         
         try:
-            # Имя и возраст
-            name_el = self.get_locator(S.PROFILE_NAME)
-            if await name_el.count() > 0:
-                name_text = await name_el.first.inner_text()
-                match = re.search(r'([А-Яа-яЁёA-Za-z]+),?\s*(\d{2})?', name_text)
-                if match:
-                    info['name'] = match.group(1)
-                    info['age'] = match.group(2) if match.group(2) else '?'
+            # Пробуем разные селекторы для имени
+            selectors_name = [
+                S.PROFILE_NAME,  # .j2wk1ydI
+                'h2',
+                '[class*="Title"]',
+                '[class*="name"]',
+            ]
+            
+            for sel in selectors_name:
+                try:
+                    name_el = self.get_locator(sel)
+                    count = await name_el.count()
+                    if count > 0:
+                        name_text = await name_el.first.inner_text()
+                        if name_text and len(name_text) > 1:
+                            match = re.search(r'([А-Яа-яЁёA-Za-z]+),?\s*(\d{2})?', name_text)
+                            if match:
+                                info['name'] = match.group(1)
+                                info['age'] = match.group(2) if match.group(2) else '?'
+                                break
+                except:
+                    pass
             
             # Био
             bio_el = self.get_locator(S.PROFILE_BIO)
             if await bio_el.count() > 0:
                 info['bio'] = await bio_el.first.inner_text()
-            
-            # Что ищет
-            looking_el = self.get_locator(S.PROFILE_LOOKING_FOR)
-            if await looking_el.count() > 0:
-                info['looking_for'] = await looking_el.first.inner_text()
                 
         except Exception as e:
-            print(f"⚠️ Ошибка парсинга: {e}")
+            pass  # Тихо игнорируем
         
         return info
     
@@ -97,16 +119,27 @@ class VKDatingTester:
     async def action_superlike(self):
         """Ставит суперлайк через кнопку"""
         try:
-            btn = self.get_locator(S.BTN_SUPERLIKE)
-            if await btn.count() > 0:
-                await btn.click()
-                await asyncio.sleep(0.5)
-                confirm = self.get_locator(S.BTN_SEND_SUPERLIKE)
-                if await confirm.count() > 0:
-                    await confirm.click()
-                print("🔥 Суперлайк!")
-            else:
-                print("⚠️ Кнопка суперлайка не найдена")
+            # Пробуем разные селекторы
+            selectors = [
+                S.BTN_SUPERLIKE,
+                '[aria-label="super-like"]',
+                '[data-reaction="super-like"]',
+                'button:has([class*="fire"])',
+            ]
+            
+            for sel in selectors:
+                btn = self.get_locator(sel)
+                if await btn.count() > 0:
+                    await btn.click()
+                    await asyncio.sleep(0.5)
+                    # Подтверждение
+                    confirm = self.get_locator(S.BTN_SEND_SUPERLIKE)
+                    if await confirm.count() > 0:
+                        await confirm.click()
+                    print("🔥 Суперлайк!")
+                    return
+            
+            print("⚠️ Кнопка суперлайка не найдена")
         except Exception as e:
             print(f"⚠️ Ошибка суперлайка: {e}")
         await asyncio.sleep(0.8)
@@ -120,12 +153,7 @@ class VKDatingTester:
         print("⬅️ Предыдущее фото")
     
     async def go_to_tab(self, tab_name: str):
-        tabs = {
-            'cards': S.TAB_CARDS,
-            'likes': S.TAB_LIKES,
-            'chats': S.TAB_CHATS,
-            'profile': S.TAB_PROFILE,
-        }
+        """Переходит на вкладку через iframe"""
         tab_names_ru = {
             'cards': 'Анкеты',
             'likes': 'Лайки',
@@ -133,19 +161,36 @@ class VKDatingTester:
             'profile': 'Профиль',
         }
         
-        if tab_name in tabs:
-            try:
-                tab = self.get_locator(tabs[tab_name])
-                if await tab.count() > 0:
-                    await tab.click()
-                    print(f"📑 {tab_names_ru[tab_name]}")
-                    await asyncio.sleep(1)
-                else:
-                    await self.page.click(f'text="{tab_names_ru[tab_name]}"')
-                    print(f"📑 {tab_names_ru[tab_name]} (text)")
-                    await asyncio.sleep(1)
-            except Exception as e:
-                print(f"⚠️ Ошибка навигации: {e}")
+        if tab_name not in tab_names_ru:
+            return
+            
+        ru_name = tab_names_ru[tab_name]
+        
+        try:
+            # Пробуем через iframe
+            selectors = [
+                f'span:has-text("{ru_name}")',
+                f'text="{ru_name}"',
+                f'[class*="TabsItem"]:has-text("{ru_name}")',
+                f'div:has-text("{ru_name}")',
+            ]
+            
+            for sel in selectors:
+                try:
+                    tab = self.get_locator(sel)
+                    count = await tab.count()
+                    if count > 0:
+                        await tab.first.click()
+                        print(f"📑 {ru_name}")
+                        await asyncio.sleep(1)
+                        return
+                except:
+                    pass
+            
+            print(f"⚠️ Вкладка '{ru_name}' не найдена")
+            
+        except Exception as e:
+            print(f"⚠️ Ошибка навигации: {e}")
     
     async def send_message(self, text: str):
         try:
@@ -168,15 +213,57 @@ class VKDatingTester:
     
     async def open_filters(self):
         try:
-            btn = self.get_locator(S.FILTER_BTN)
-            if await btn.count() > 0:
-                await btn.click()
-                print("⚙️ Фильтры открыты")
-                await asyncio.sleep(0.5)
-            else:
-                print("⚠️ Кнопка фильтров не найдена")
+            selectors = [
+                S.FILTER_BTN,
+                '[class*="filter"]',
+                'button:has([class*="tune"])',
+            ]
+            for sel in selectors:
+                btn = self.get_locator(sel)
+                if await btn.count() > 0:
+                    await btn.click()
+                    print("⚙️ Фильтры открыты")
+                    await asyncio.sleep(0.5)
+                    return
+            print("⚠️ Кнопка фильтров не найдена")
         except Exception as e:
             print(f"⚠️ Ошибка: {e}")
+    
+    async def debug_dom(self):
+        """Выводит отладочную информацию о DOM"""
+        print("\n🔍 DEBUG DOM:")
+        
+        # Проверяем iframe
+        iframes = await self.page.locator('iframe').count()
+        print(f"   Iframes: {iframes}")
+        
+        if self.frame:
+            # Проверяем ключевые элементы
+            checks = [
+                ('[aria-label="like"]', 'Кнопка лайк'),
+                ('[aria-label="dislike"]', 'Кнопка дизлайк'),
+                ('[aria-label="super-like"]', 'Кнопка суперлайк'),
+                ('span:has-text("Анкеты")', 'Вкладка Анкеты'),
+                ('span:has-text("Чаты")', 'Вкладка Чаты'),
+                ('h2', 'Заголовок h2'),
+                ('[class*="Title"]', 'Title класс'),
+            ]
+            
+            for sel, name in checks:
+                try:
+                    el = self.get_locator(sel)
+                    count = await el.count()
+                    text = ""
+                    if count > 0:
+                        try:
+                            text = await el.first.inner_text()
+                            text = text[:30].replace('\n', ' ')
+                        except:
+                            pass
+                    status = "✅" if count > 0 else "❌"
+                    print(f"   {status} {name}: {count} шт {f'({text})' if text else ''}")
+                except Exception as e:
+                    print(f"   ❌ {name}: ошибка - {e}")
 
 
 async def test_vk_dating():
@@ -187,7 +274,7 @@ async def test_vk_dating():
     session_path = os.path.join(os.path.dirname(__file__), "vk_session.json")
     
     if not os.path.exists(session_path):
-        print("❌ Сначала запустите: py auth_vk.py")
+        print("❌ Сначала запустите: py auth_chrome.py")
         return
     
     async with async_playwright() as p:
@@ -235,27 +322,16 @@ async def test_vk_dating():
         await asyncio.sleep(0.3)
         
         info = await tester.get_profile_info()
-        if info:
-            name = info.get('name', '?')
-            age = info.get('age', '?')
-            print(f"👤 Текущая: {name}, {age}")
-            if 'bio' in info:
-                print(f"   📝 {info['bio'][:60]}...")
+        if info and info.get('name'):
+            print(f"👤 Текущая: {info.get('name')}, {info.get('age', '?')}")
         
         print("\n" + "="*50)
         print("🎮 УПРАВЛЕНИЕ")
         print("="*50)
-        print("  l (или ю/.) - Лайк")
-        print("  d (или б/,) - Дизлайк")
-        print("  s           - Суперлайк")
-        print("  a (←)       - Предыдущее фото")
-        print("  f (→)       - Следующее фото")
-        print("  p           - Показать профиль")
-        print("  t           - Вкладки (1-4)")
-        print("  m           - Отправить сообщение")
-        print("  g           - Фильтры")
-        print("  r           - Обновить")
-        print("  q           - Выход")
+        print("  l - Лайк       d - Дизлайк    s - Суперлайк")
+        print("  a - ← Фото     f - Фото →     p - Профиль")
+        print("  t - Вкладки    m - Сообщение  g - Фильтры")
+        print("  x - DEBUG DOM  r - Обновить   q - Выход")
         print("="*50)
         
         while True:
@@ -264,13 +340,13 @@ async def test_vk_dating():
             if cmd == 'q':
                 break
                 
-            elif cmd in ['l', 'ю', '.', '>']:
+            elif cmd in ['l', 'ю', '.']:
                 await tester.action_like()
                 info = await tester.get_profile_info()
                 if info.get('name'):
                     print(f"👤 Новая: {info.get('name')}, {info.get('age', '?')}")
                     
-            elif cmd in ['d', 'б', ',', '<']:
+            elif cmd in ['d', 'б', ',']:
                 await tester.action_dislike()
                 info = await tester.get_profile_info()
                 if info.get('name'):
@@ -279,22 +355,20 @@ async def test_vk_dating():
             elif cmd == 's':
                 await tester.action_superlike()
                     
-            elif cmd in ['a', 'ф', 'left']:
+            elif cmd in ['a', 'ф']:
                 await tester.photo_prev()
                 
-            elif cmd in ['f', 'а', 'right']:
+            elif cmd in ['f', 'а']:
                 await tester.photo_next()
                 
             elif cmd == 'p':
                 info = await tester.get_profile_info()
-                if info:
-                    print(f"👤 {info.get('name', '?')}, {info.get('age', '?')}")
+                if info and info.get('name'):
+                    print(f"👤 {info.get('name')}, {info.get('age', '?')}")
                     if 'bio' in info:
                         print(f"   📝 {info['bio']}")
-                    if 'looking_for' in info:
-                        print(f"   🔍 {info['looking_for']}")
                 else:
-                    print("Профиль не найден")
+                    print("Профиль не найден (введи x для debug)")
                     
             elif cmd == 't':
                 print("  1=Анкеты  2=Лайки  3=Чаты  4=Профиль")
@@ -310,6 +384,9 @@ async def test_vk_dating():
             
             elif cmd == 'g':
                 await tester.open_filters()
+            
+            elif cmd == 'x':
+                await tester.debug_dom()
                     
             elif cmd == 'r':
                 await page.reload()
