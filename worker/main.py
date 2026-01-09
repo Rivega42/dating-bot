@@ -1,6 +1,7 @@
 """
 Dating Bot Platform - Browser Worker
-VK Dating селекторы основаны на исследовании DOM (2026-01-08)
+VK Dating с поддержкой десктопной и мобильной версии
+Селекторы: worker/vk_selectors.py
 """
 import os
 import json
@@ -11,10 +12,12 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 import redis.asyncio as redis
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page, FrameLocator
 from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text
+
+from vk_selectors import VKDatingSelectors as S, VKDatingHotkeys as K
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -26,6 +29,7 @@ class Settings(BaseSettings):
     max_browsers: int = 8
     browser_timeout: int = 30000
     worker_id: str = "worker-1"
+    use_desktop: bool = True  # True = vk.com/dating, False = m.vk.com/dating
     anthropic_api_key: Optional[str] = None
     class Config:
         env_file = ".env"
@@ -36,30 +40,22 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-# VK Dating селекторы (m.vk.com/dating - мобильная версия без iframe)
-class VKSelectors:
-    # Кнопки действий (по иконкам внутри)
+# Мобильные селекторы (m.vk.com/dating)
+class VKMobileSelectors:
     BTN_SKIP = 'button:has([class*="vkuiIcon--cancel_outline_28"])'
     BTN_LIKE = 'button:has([class*="vkuiIcon--like_outline_28"]):not([class*="TabbarItem"])'
     BTN_SUPERLIKE = 'button:has([class*="vkuiIcon--fire_alt_outline_28"])'
     BTN_REWIND = 'button:has([class*="vkuiIcon--replay_outline_28"])'
     BTN_BOOST = 'button:has([class*="vkuiIcon--flash_28"])'
     
-    # Табы навигации
     TAB_CARDS = '[class*="vkuiTabbarItem"]:has([class*="vkuiIcon--cards_2_outline_28"])'
-    TAB_COLLECTIONS = '[class*="vkuiTabbarItem"]:has([class*="vkuiIcon--search_like_outline_28"])'
     TAB_LIKES = '[class*="vkuiTabbarItem"]:has([class*="vkuiIcon--like_outline_28"])'
     TAB_CHATS = '[class*="vkuiTabbarItem"]:has([class*="vkuiIcon--message_outline_28"])'
     TAB_PROFILE = '[class*="vkuiTabbarItem"]:has([class*="vkuiIcon--user_circle_outline_28"])'
     
-    # Данные профиля
     PROFILE_NAME = '[class*="vkuiTitle__level2"][class*="accent"]'
     PROFILE_INFO = '[class*="vkuiMiniInfoCell"]'
     PROFILE_TEXT = '[class*="vkuiText"], [class*="vkuiParagraph"]'
-    
-    # Контейнеры
-    PANEL = '[class*="vkuiPanel__in"]'
-    CARD_AREA = '[class*="vkuiView__panel"]'
 
 
 class BrowserPool:
@@ -79,7 +75,7 @@ class BrowserPool:
         if self.playwright:
             await self.playwright.stop()
         
-    async def get_or_create(self, account_id: str, session_data: Optional[dict] = None) -> Page:
+    async def get_or_create(self, account_id: str, session_data: Optional[dict] = None, desktop: bool = True) -> Page:
         async with self.lock:
             if account_id in self.browsers:
                 self.browsers[account_id]["last_active"] = datetime.utcnow()
@@ -102,19 +98,26 @@ class BrowserPool:
                 ]
             )
             
-            # Мобильный user-agent для m.vk.com
-            context_options = {
-                "viewport": {"width": 414, "height": 896},
-                "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
-                "locale": "ru-RU",
-                "timezone_id": "Europe/Moscow"
-            }
+            if desktop:
+                context_options = {
+                    "viewport": {"width": 1280, "height": 900},
+                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "locale": "ru-RU",
+                    "timezone_id": "Europe/Moscow"
+                }
+            else:
+                context_options = {
+                    "viewport": {"width": 414, "height": 896},
+                    "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+                    "locale": "ru-RU",
+                    "timezone_id": "Europe/Moscow"
+                }
+                
             if session_data:
                 context_options["storage_state"] = session_data
                 
             context = await browser.new_context(**context_options)
             
-            # Anti-detection
             await context.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             """)
@@ -126,7 +129,8 @@ class BrowserPool:
                 "browser": browser, 
                 "context": context, 
                 "page": page, 
-                "last_active": datetime.utcnow()
+                "last_active": datetime.utcnow(),
+                "desktop": desktop
             }
             logger.info(f"🌐 Browser created for account {account_id[:8]}... ({len(self.browsers)}/{self.max_browsers})")
             return page
@@ -164,78 +168,117 @@ class BrowserPool:
 
 
 class VKDatingBot:
-    """Бот для VK Dating (m.vk.com/dating)"""
+    """Бот для VK Dating - поддержка десктоп и мобильной версии"""
     
-    def __init__(self, page: Page, account_id: str, config: dict):
+    def __init__(self, page: Page, account_id: str, config: dict, desktop: bool = True):
         self.page = page
         self.account_id = account_id
         self.config = config
+        self.desktop = desktop
         self.running = True
-        self.stats = {"likes": 0, "skips": 0, "matches": 0}
+        self.stats = {"likes": 0, "skips": 0, "matches": 0, "superlikes": 0}
+        self.frame: FrameLocator | None = None
         
-    async def start(self):
+    def get_locator(self, selector: str):
+        """Возвращает локатор с учётом iframe (для десктопа)"""
+        if self.desktop and self.frame:
+            return self.frame.locator(selector)
+        return self.page.locator(selector)
+        
+    async def start(self) -> bool:
         """Открывает VK Dating"""
-        logger.info(f"🎮 Starting bot for account {self.account_id[:8]}...")
+        logger.info(f"🎮 Starting bot for account {self.account_id[:8]}... (desktop={self.desktop})")
         
-        # Мобильная версия - без iframe!
-        await self.page.goto("https://m.vk.com/dating", wait_until="domcontentloaded")
+        url = "https://vk.com/dating" if self.desktop else "https://m.vk.com/dating"
+        await self.page.goto(url, wait_until="domcontentloaded")
+        await asyncio.sleep(2)
         
-        # Ждём загрузки приложения
+        if self.desktop:
+            # Определяем iframe
+            try:
+                iframes = await self.page.locator('iframe').count()
+                if iframes > 0:
+                    self.frame = self.page.frame_locator('iframe').first
+                    logger.info(f"📦 Iframe detected ({iframes})")
+            except Exception as e:
+                logger.warning(f"Iframe detection error: {e}")
+        
+        # Проверяем загрузку
         try:
-            await self.page.wait_for_selector(VKSelectors.PROFILE_NAME, timeout=30000)
-            logger.info(f"✅ VK Dating loaded for account {self.account_id[:8]}")
+            if self.desktop:
+                # Для десктопа ждём кнопку лайка
+                await self.page.wait_for_timeout(3000)
+                # Активируем страницу для горячих клавиш
+                await self.page.click('body')
+                logger.info(f"✅ VK Dating (desktop) loaded for {self.account_id[:8]}")
+            else:
+                await self.page.wait_for_selector(VKMobileSelectors.PROFILE_NAME, timeout=30000)
+                logger.info(f"✅ VK Dating (mobile) loaded for {self.account_id[:8]}")
             return True
-        except:
-            # Возможно нужна авторизация
-            logger.warning(f"⚠️ Dating not loaded, may need auth for {self.account_id[:8]}")
+        except Exception as e:
+            logger.warning(f"⚠️ Dating not loaded, may need auth for {self.account_id[:8]}: {e}")
             return False
     
     async def parse_card(self) -> Optional[dict]:
         """Парсит текущую карточку профиля"""
         try:
-            # Ждём карточку
-            name_el = self.page.locator(VKSelectors.PROFILE_NAME).first
-            if not await name_el.is_visible(timeout=5000):
-                return None
-            
             data = {
                 "timestamp": datetime.utcnow().isoformat(),
                 "account_id": self.account_id
             }
             
-            # Имя и возраст
-            name_text = await name_el.inner_text()
-            data["raw_name"] = name_text
-            
-            # Парсим "Имя, 25"
-            match = re.match(r'^(.+?),\s*(\d+)$', name_text.strip())
-            if match:
-                data["name"] = match.group(1)
-                data["age"] = int(match.group(2))
+            if self.desktop:
+                # Десктоп версия
+                name_el = self.get_locator(S.PROFILE_NAME)
+                if await name_el.count() > 0:
+                    name_text = await name_el.first.inner_text()
+                    data["raw_name"] = name_text
+                    match = re.match(r'^(.+?),\s*(\d+)$', name_text.strip())
+                    if match:
+                        data["name"] = match.group(1)
+                        data["age"] = int(match.group(2))
+                    else:
+                        data["name"] = name_text
+                
+                bio_el = self.get_locator(S.PROFILE_BIO)
+                if await bio_el.count() > 0:
+                    data["bio"] = await bio_el.first.inner_text()
+                    
             else:
-                data["name"] = name_text
+                # Мобильная версия
+                name_el = self.page.locator(VKMobileSelectors.PROFILE_NAME).first
+                if await name_el.is_visible(timeout=5000):
+                    name_text = await name_el.inner_text()
+                    data["raw_name"] = name_text
+                    match = re.match(r'^(.+?),\s*(\d+)$', name_text.strip())
+                    if match:
+                        data["name"] = match.group(1)
+                        data["age"] = int(match.group(2))
+                    else:
+                        data["name"] = name_text
+                
+                # Info items
+                info_items = []
+                info_els = self.page.locator(VKMobileSelectors.PROFILE_INFO)
+                count = await info_els.count()
+                for i in range(min(count, 5)):
+                    text = await info_els.nth(i).inner_text()
+                    if text.strip():
+                        info_items.append(text.strip())
+                data["info"] = info_items
+                
+                # Bio
+                text_els = self.page.locator(VKMobileSelectors.PROFILE_TEXT)
+                texts = []
+                count = await text_els.count()
+                for i in range(min(count, 10)):
+                    text = await text_els.nth(i).inner_text()
+                    if text.strip() and len(text.strip()) > 3:
+                        texts.append(text.strip())
+                data["bio"] = " ".join(texts)
             
-            # Дополнительная информация (город, работа, образование)
-            info_items = []
-            info_els = self.page.locator(VKSelectors.PROFILE_INFO)
-            count = await info_els.count()
-            for i in range(min(count, 5)):
-                text = await info_els.nth(i).inner_text()
-                if text.strip():
-                    info_items.append(text.strip())
-            data["info"] = info_items
-            
-            # Текст профиля (bio)
-            text_els = self.page.locator(VKSelectors.PROFILE_TEXT)
-            texts = []
-            count = await text_els.count()
-            for i in range(min(count, 10)):
-                text = await text_els.nth(i).inner_text()
-                if text.strip() and len(text.strip()) > 3:
-                    texts.append(text.strip())
-            data["bio"] = " ".join(texts)
-            
-            logger.info(f"👤 Parsed: {data.get('name', 'Unknown')}, {data.get('age', '?')} - {data.get('info', [])[:2]}")
+            if data.get("name"):
+                logger.info(f"👤 Parsed: {data.get('name', 'Unknown')}, {data.get('age', '?')}")
             return data
             
         except Exception as e:
@@ -259,7 +302,7 @@ class VKDatingBot:
         max_age = filters.get("max_age", 100)
         if min_age <= age <= max_age:
             score += 10
-            reasons.append(f"возраст {age} в диапазоне")
+            reasons.append(f"возраст {age} ок")
         elif age > 0:
             score -= 50
             reasons.append(f"возраст {age} вне диапазона")
@@ -302,69 +345,89 @@ class VKDatingBot:
         
         return decision
     
-    async def click_like(self) -> bool:
-        """Нажимает кнопку лайка"""
+    async def action_like(self) -> bool:
+        """Ставит лайк"""
         try:
-            btn = self.page.locator(VKSelectors.BTN_LIKE).first
-            await btn.click()
+            if self.desktop:
+                # Горячая клавиша - самый надёжный метод
+                await self.page.keyboard.press(K.LIKE)
+            else:
+                btn = self.page.locator(VKMobileSelectors.BTN_LIKE).first
+                await btn.click()
             self.stats["likes"] += 1
             await asyncio.sleep(0.5)
             return True
         except Exception as e:
-            logger.error(f"Error clicking like: {e}")
+            logger.error(f"Error liking: {e}")
             return False
     
-    async def click_skip(self) -> bool:
-        """Нажимает кнопку пропуска"""
+    async def action_skip(self) -> bool:
+        """Пропускает карточку"""
         try:
-            btn = self.page.locator(VKSelectors.BTN_SKIP).first
-            await btn.click()
+            if self.desktop:
+                await self.page.keyboard.press(K.DISLIKE)
+            else:
+                btn = self.page.locator(VKMobileSelectors.BTN_SKIP).first
+                await btn.click()
             self.stats["skips"] += 1
             await asyncio.sleep(0.5)
             return True
         except Exception as e:
-            logger.error(f"Error clicking skip: {e}")
+            logger.error(f"Error skipping: {e}")
             return False
     
-    async def click_superlike(self) -> bool:
-        """Нажимает суперлайк"""
+    async def action_superlike(self) -> bool:
+        """Ставит суперлайк"""
         try:
-            btn = self.page.locator(VKSelectors.BTN_SUPERLIKE).first
-            if await btn.is_visible():
-                await btn.click()
-                logger.info(f"💜 Superlike sent!")
-                await asyncio.sleep(0.5)
-                return True
+            if self.desktop:
+                btn = self.get_locator(S.BTN_SUPERLIKE)
+                if await btn.count() > 0:
+                    await btn.click()
+                    await asyncio.sleep(0.5)
+                    # Подтверждение
+                    confirm = self.get_locator(S.BTN_SEND_SUPERLIKE)
+                    if await confirm.count() > 0:
+                        await confirm.click()
+            else:
+                btn = self.page.locator(VKMobileSelectors.BTN_SUPERLIKE).first
+                if await btn.is_visible():
+                    await btn.click()
+            
+            self.stats["superlikes"] += 1
+            logger.info("🔥 Superlike!")
+            await asyncio.sleep(0.5)
+            return True
         except Exception as e:
-            logger.error(f"Error clicking superlike: {e}")
-        return False
-    
-    async def activate_boost(self) -> bool:
-        """Активирует буст"""
-        try:
-            btn = self.page.locator(VKSelectors.BTN_BOOST).first
-            if await btn.is_visible():
-                await btn.click()
-                logger.info(f"🚀 Boost activated for {self.account_id[:8]}")
-                return True
-        except Exception as e:
-            logger.error(f"Error activating boost: {e}")
-        return False
+            logger.error(f"Error superlking: {e}")
+            return False
     
     async def go_to_tab(self, tab: str) -> bool:
-        """Переходит на указанный таб"""
-        selectors = {
-            "cards": VKSelectors.TAB_CARDS,
-            "collections": VKSelectors.TAB_COLLECTIONS,
-            "likes": VKSelectors.TAB_LIKES,
-            "chats": VKSelectors.TAB_CHATS,
-            "profile": VKSelectors.TAB_PROFILE
-        }
+        """Переходит на указанную вкладку"""
         try:
-            if tab in selectors:
-                await self.page.locator(selectors[tab]).click()
-                await asyncio.sleep(1)
-                return True
+            if self.desktop:
+                tabs = {
+                    "cards": S.TAB_CARDS,
+                    "likes": S.TAB_LIKES,
+                    "chats": S.TAB_CHATS,
+                    "profile": S.TAB_PROFILE
+                }
+                if tab in tabs:
+                    loc = self.get_locator(tabs[tab])
+                    if await loc.count() > 0:
+                        await loc.click()
+                        await asyncio.sleep(1)
+                        return True
+            else:
+                tabs = {
+                    "cards": VKMobileSelectors.TAB_CARDS,
+                    "likes": VKMobileSelectors.TAB_LIKES,
+                    "chats": VKMobileSelectors.TAB_CHATS,
+                    "profile": VKMobileSelectors.TAB_PROFILE
+                }
+                if tab in tabs:
+                    await self.page.locator(tabs[tab]).click()
+                    await asyncio.sleep(1)
+                    return True
         except Exception as e:
             logger.error(f"Error navigating to {tab}: {e}")
         return False
@@ -373,43 +436,37 @@ class VKDatingBot:
         """Запускает сессию свайпов"""
         swipes = 0
         
-        # Переходим на вкладку анкет
         await self.go_to_tab("cards")
         await asyncio.sleep(2)
         
         while self.running and swipes < max_swipes:
             try:
-                # Парсим карточку
                 card = await self.parse_card()
-                if not card:
+                if not card or not card.get("name"):
                     logger.info("No card visible, waiting...")
                     await asyncio.sleep(3)
                     continue
                 
-                # Оцениваем
                 decision = self.evaluate_card(card)
                 logger.info(f"👤 {card.get('name', '?')}, {card.get('age', '?')}: "
                            f"score={decision['score']}, like={decision['like']} "
                            f"({', '.join(decision['reasons'][:3])})")
                 
-                # Действуем
-                if decision.get("superlike") and await self.click_superlike():
-                    pass
+                if decision.get("superlike"):
+                    await self.action_superlike()
                 elif decision["like"]:
-                    await self.click_like()
+                    await self.action_like()
                 else:
-                    await self.click_skip()
+                    await self.action_skip()
                 
                 swipes += 1
-                
-                # Случайная задержка 1-3 сек
                 await asyncio.sleep(1 + (swipes % 3))
                 
             except Exception as e:
                 logger.error(f"Swipe session error: {e}")
                 await asyncio.sleep(5)
         
-        logger.info(f"📊 Session done: {swipes} swipes, {self.stats['likes']} likes, {self.stats['skips']} skips")
+        logger.info(f"📊 Session done: {swipes} swipes, {self.stats}")
         return self.stats
     
     def stop(self):
@@ -431,7 +488,7 @@ class TaskProcessor:
         await pubsub.psubscribe("control:*")
         asyncio.create_task(self._listen_control(pubsub))
         
-        logger.info(f"✅ Task processor started (worker: {settings.worker_id})")
+        logger.info(f"✅ Task processor started (worker: {settings.worker_id}, desktop={settings.use_desktop})")
         
     async def stop(self):
         self.running = False
@@ -484,10 +541,6 @@ class TaskProcessor:
                     max_swipes = task.get("params", {}).get("max_swipes", 50)
                     await self.bots[account_id].run_swipe_session(max_swipes)
                     
-            elif task_type == "activate_boost":
-                if account_id in self.bots:
-                    await self.bots[account_id].activate_boost()
-                    
             elif task_type == "stop_session":
                 if account_id in self.bots:
                     self.bots[account_id].stop()
@@ -532,8 +585,12 @@ class TaskProcessor:
                 "boost_times": row.boost_times
             }
             
-            page = await self.browser_pool.get_or_create(account_id, session_data)
-            bot = VKDatingBot(page, account_id, config)
+            page = await self.browser_pool.get_or_create(
+                account_id, 
+                session_data, 
+                desktop=settings.use_desktop
+            )
+            bot = VKDatingBot(page, account_id, config, desktop=settings.use_desktop)
             
             if await bot.start():
                 self.bots[account_id] = bot
