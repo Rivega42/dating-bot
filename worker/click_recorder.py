@@ -1,6 +1,6 @@
 """
 Рекордер кликов - записывает клики с подписями
-После каждого клика спрашивает что это было
+Использует Playwright CDP для перехвата кликов
 
 Запуск: py click_recorder.py
 """
@@ -54,79 +54,97 @@ async def click_recorder():
         print("📱 Открываем vk.com/dating...")
         await page.goto("https://vk.com/dating", wait_until="domcontentloaded", timeout=60000)
         
-        # Ждём загрузки контента
         print("⏳ Ждём загрузку страницы...")
         await asyncio.sleep(5)
         
-        # Инжектим скрипт ПОСЛЕ загрузки страницы
+        # Инжектим в основную страницу И во все фреймы
         print("🔧 Устанавливаем перехватчик кликов...")
-        await page.evaluate("""
-            window._clickedElements = [];
-            window._clickId = 0;
-            
-            document.addEventListener('mousedown', (e) => {
-                const el = document.elementFromPoint(e.clientX, e.clientY) || e.target;
-                const rect = el.getBoundingClientRect();
+        
+        inject_script = """
+            if (!window._clickRecorderInstalled) {
+                window._clickRecorderInstalled = true;
+                window._clickedElements = window._clickedElements || [];
+                window._clickId = window._clickId || 0;
                 
-                // Собираем путь
-                let path = [];
-                let current = el;
-                for (let i = 0; i < 10 && current && current !== document.body; i++) {
-                    let selector = current.tagName.toLowerCase();
-                    if (current.id) {
-                        selector += '#' + current.id;
-                    } else if (current.className && typeof current.className === 'string') {
-                        const classes = current.className.split(' ').filter(c => c && c.length < 30).slice(0, 3);
-                        if (classes.length) selector += '.' + classes.join('.');
+                document.addEventListener('mousedown', (e) => {
+                    const el = document.elementFromPoint(e.clientX, e.clientY) || e.target;
+                    const rect = el.getBoundingClientRect();
+                    
+                    let path = [];
+                    let current = el;
+                    for (let i = 0; i < 10 && current && current !== document.body; i++) {
+                        let selector = current.tagName.toLowerCase();
+                        if (current.id) {
+                            selector += '#' + current.id;
+                        } else if (current.className && typeof current.className === 'string') {
+                            const classes = current.className.split(' ').filter(c => c && c.length < 30).slice(0, 3);
+                            if (classes.length) selector += '.' + classes.join('.');
+                        }
+                        path.unshift(selector);
+                        current = current.parentElement;
                     }
-                    path.unshift(selector);
-                    current = current.parentElement;
-                }
-                
-                // Ищем ближайшую кнопку/ссылку
-                let clickable = el;
-                let search = el;
-                for (let i = 0; i < 5 && search; i++) {
-                    if (search.tagName === 'BUTTON' || search.tagName === 'A' || search.getAttribute('role') === 'button') {
-                        clickable = search;
-                        break;
+                    
+                    let clickable = el;
+                    let search = el;
+                    for (let i = 0; i < 5 && search; i++) {
+                        if (search.tagName === 'BUTTON' || search.tagName === 'A' || search.getAttribute('role') === 'button') {
+                            clickable = search;
+                            break;
+                        }
+                        search = search.parentElement;
                     }
-                    search = search.parentElement;
-                }
+                    
+                    const clickableRect = clickable.getBoundingClientRect();
+                    
+                    window._clickId++;
+                    const info = {
+                        id: window._clickId,
+                        timestamp: new Date().toISOString(),
+                        frame: window.location.href,
+                        element: {
+                            tag: el.tagName,
+                            id: el.id || null,
+                            className: (typeof el.className === 'string' ? el.className : '') || null,
+                            text: el.innerText?.slice(0, 150)?.replace(/\\n/g, ' ') || null,
+                            ariaLabel: el.getAttribute('aria-label') || null,
+                        },
+                        clickable: {
+                            tag: clickable.tagName,
+                            id: clickable.id || null,
+                            className: (typeof clickable.className === 'string' ? clickable.className : '') || null,
+                            text: clickable.innerText?.slice(0, 150)?.replace(/\\n/g, ' ') || null,
+                            ariaLabel: clickable.getAttribute('aria-label') || null,
+                            href: clickable.href || null,
+                        },
+                        rect: {x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height)},
+                        clickableRect: {x: Math.round(clickableRect.x), y: Math.round(clickableRect.y), width: Math.round(clickableRect.width), height: Math.round(clickableRect.height)},
+                        path: path.join(' > '),
+                        outerHTML: clickable.outerHTML?.slice(0, 800) || null
+                    };
+                    
+                    window._clickedElements.push(info);
+                }, true);
                 
-                const clickableRect = clickable.getBoundingClientRect();
-                
-                window._clickId++;
-                const info = {
-                    id: window._clickId,
-                    timestamp: new Date().toISOString(),
-                    element: {
-                        tag: el.tagName,
-                        id: el.id || null,
-                        className: (typeof el.className === 'string' ? el.className : '') || null,
-                        text: el.innerText?.slice(0, 150)?.replace(/\\n/g, ' ') || null,
-                        ariaLabel: el.getAttribute('aria-label') || null,
-                    },
-                    clickable: {
-                        tag: clickable.tagName,
-                        id: clickable.id || null,
-                        className: (typeof clickable.className === 'string' ? clickable.className : '') || null,
-                        text: clickable.innerText?.slice(0, 150)?.replace(/\\n/g, ' ') || null,
-                        ariaLabel: clickable.getAttribute('aria-label') || null,
-                        href: clickable.href || null,
-                    },
-                    rect: {x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height)},
-                    clickableRect: {x: Math.round(clickableRect.x), y: Math.round(clickableRect.y), width: Math.round(clickableRect.width), height: Math.round(clickableRect.height)},
-                    path: path.join(' > '),
-                    outerHTML: clickable.outerHTML?.slice(0, 800) || null
-                };
-                
-                window._clickedElements.push(info);
-                console.log('CLICK:', info.element.tag, info.element.text?.slice(0, 30));
-            }, true);
-            
-            console.log('Click recorder installed!');
-        """)
+                'installed';
+            } else {
+                'already installed';
+            }
+        """
+        
+        # Инжектим в основную страницу
+        result = await page.evaluate(inject_script)
+        print(f"  Основная страница: {result}")
+        
+        # Инжектим во все фреймы
+        frames = page.frames
+        print(f"  Найдено фреймов: {len(frames)}")
+        for i, frame in enumerate(frames):
+            try:
+                result = await frame.evaluate(inject_script)
+                frame_url = frame.url[:50] if frame.url else "unknown"
+                print(f"  Фрейм {i} ({frame_url}...): {result}")
+            except Exception as e:
+                print(f"  Фрейм {i}: ошибка - {str(e)[:30]}")
         
         print("✅ Перехватчик установлен!")
         print()
@@ -134,44 +152,49 @@ async def click_recorder():
         print("🎬 ЗАПИСЬ НАЧАЛАСЬ!")
         print("="*60)
         print()
-        print("1. Кликни на элемент в браузере")
-        print("2. Введи название (например: btn_like, tab_chats)")
-        print("3. Повтори для всех элементов")
+        print("Кликни на элемент в браузере, затем введи название.")
+        print("Примеры: btn_like, btn_dislike, tab_chats, profile_name")
         print()
-        print("Подсказки для названий:")
-        print("  btn_like      - кнопка лайка")
-        print("  btn_dislike   - кнопка дизлайка")
-        print("  btn_superlike - кнопка суперлайка")
-        print("  tab_cards     - вкладка Анкеты")
-        print("  tab_likes     - вкладка Лайки")
-        print("  tab_chats     - вкладка Чаты")
-        print("  tab_profile   - вкладка Профиль")
-        print("  profile_name  - имя на карточке")
-        print("  photo         - фото карточки")
-        print()
-        print("Введи 'q' для выхода, 's' для показа всех записей")
+        print("Команды: q=выход, s=показать записи")
         print("="*60)
         
         session_clicks = []
         click_count = 0
         
         while True:
-            # Ждём клик
             print("\n⏳ Кликни на элемент в браузере...")
             
-            # Polling для кликов
+            # Polling для кликов из всех фреймов
             click = None
-            while not click:
+            attempts = 0
+            while not click and attempts < 1000:  # ~5 минут ожидания
                 await asyncio.sleep(0.3)
+                attempts += 1
+                
+                # Проверяем основную страницу
                 try:
-                    new_clicks = await page.evaluate("window._clickedElements.splice(0)")
-                    if new_clicks:
+                    new_clicks = await page.evaluate("window._clickedElements?.splice(0) || []")
+                    if new_clicks and len(new_clicks) > 0:
                         click = new_clicks[-1]
-                except Exception as e:
-                    print(f"⚠️ Ошибка: {e}")
+                        break
+                except:
+                    pass
+                
+                # Проверяем все фреймы
+                for frame in page.frames:
+                    try:
+                        new_clicks = await frame.evaluate("window._clickedElements?.splice(0) || []")
+                        if new_clicks and len(new_clicks) > 0:
+                            click = new_clicks[-1]
+                            break
+                    except:
+                        pass
+                
+                if click:
                     break
             
             if not click:
+                print("⏱️ Таймаут ожидания клика")
                 continue
             
             click_count += 1
@@ -228,20 +251,20 @@ async def click_recorder():
         print(f"💾 Сохранено в {log_path}")
         
         # Генерируем Python код с селекторами
-        selectors_path = os.path.join(os.path.dirname(log_path), "selectors.py")
-        with open(selectors_path, "w", encoding="utf-8") as f:
-            f.write('"""VK Dating селекторы - сгенерировано автоматически"""\n\n')
-            f.write('class VKDatingSelectors:\n')
-            for c in session_clicks:
-                label = c['label'].upper().replace(' ', '_')
-                class_name = c['clickable']['className'] or c['element']['className'] or ''
-                first_class = class_name.split()[0] if class_name else ''
-                if first_class:
-                    f.write(f'    {label} = ".{first_class}"  # {c["clickable"]["tag"]}\n')
-                else:
-                    f.write(f'    {label} = "{c["clickable"]["tag"].lower()}"  # no class\n')
-        
-        print(f"🐍 Селекторы: {selectors_path}")
+        if session_clicks:
+            selectors_path = os.path.join(os.path.dirname(log_path), "selectors.py")
+            with open(selectors_path, "w", encoding="utf-8") as f:
+                f.write('"""VK Dating селекторы - сгенерировано автоматически"""\n\n')
+                f.write('class VKDatingSelectors:\n')
+                for c in session_clicks:
+                    label = c['label'].upper().replace(' ', '_')
+                    class_name = c['clickable']['className'] or c['element']['className'] or ''
+                    first_class = class_name.split()[0] if class_name else ''
+                    if first_class:
+                        f.write(f'    {label} = ".{first_class}"  # {c["clickable"]["tag"]}\n')
+                    else:
+                        f.write(f'    {label} = "{c["clickable"]["tag"].lower()}"  # no class\n')
+            print(f"🐍 Селекторы: {selectors_path}")
         
         # Сохраняем сессию
         storage = await context.storage_state()
