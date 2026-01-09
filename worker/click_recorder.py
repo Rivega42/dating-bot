@@ -51,8 +51,16 @@ async def click_recorder():
         
         page = await context.new_page()
         
-        # Инжектим скрипт для отслеживания кликов
-        await page.add_init_script("""
+        print("📱 Открываем vk.com/dating...")
+        await page.goto("https://vk.com/dating", wait_until="domcontentloaded", timeout=60000)
+        
+        # Ждём загрузки контента
+        print("⏳ Ждём загрузку страницы...")
+        await asyncio.sleep(5)
+        
+        # Инжектим скрипт ПОСЛЕ загрузки страницы
+        print("🔧 Устанавливаем перехватчик кликов...")
+        await page.evaluate("""
             window._clickedElements = [];
             window._clickId = 0;
             
@@ -114,16 +122,13 @@ async def click_recorder():
                 };
                 
                 window._clickedElements.push(info);
+                console.log('CLICK:', info.element.tag, info.element.text?.slice(0, 30));
             }, true);
+            
+            console.log('Click recorder installed!');
         """)
         
-        print("📱 Открываем vk.com/dating...")
-        await page.goto("https://vk.com/dating", wait_until="domcontentloaded", timeout=60000)
-        
-        # Ждём загрузки контента
-        print("⏳ Ждём загрузку страницы...")
-        await asyncio.sleep(5)
-        
+        print("✅ Перехватчик установлен!")
         print()
         print("="*60)
         print("🎬 ЗАПИСЬ НАЧАЛАСЬ!")
@@ -142,7 +147,6 @@ async def click_recorder():
         print("  tab_chats     - вкладка Чаты")
         print("  tab_profile   - вкладка Профиль")
         print("  profile_name  - имя на карточке")
-        print("  profile_age   - возраст")
         print("  photo         - фото карточки")
         print()
         print("Введи 'q' для выхода, 's' для показа всех записей")
@@ -158,13 +162,17 @@ async def click_recorder():
             # Polling для кликов
             click = None
             while not click:
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.3)
                 try:
                     new_clicks = await page.evaluate("window._clickedElements.splice(0)")
                     if new_clicks:
-                        click = new_clicks[-1]  # Берём последний клик
-                except:
-                    pass
+                        click = new_clicks[-1]
+                except Exception as e:
+                    print(f"⚠️ Ошибка: {e}")
+                    break
+            
+            if not click:
+                continue
             
             click_count += 1
             
@@ -173,8 +181,10 @@ async def click_recorder():
             print(f"🖱️  КЛИК #{click_count}")
             print(f"{'='*60}")
             print(f"  Tag: {click['element']['tag']}")
-            print(f"  Text: {click['element']['text'][:50] if click['element']['text'] else '-'}")
-            print(f"  Class: {click['element']['className'][:60] if click['element']['className'] else '-'}")
+            text = click['element']['text'] or '-'
+            print(f"  Text: {text[:50]}")
+            cls = click['element']['className'] or '-'
+            print(f"  Class: {cls[:60]}")
             print(f"  Position: x={click['rect']['x']}, y={click['rect']['y']}")
             
             # Спрашиваем название
@@ -183,10 +193,10 @@ async def click_recorder():
             if label.lower() == 'q':
                 break
             elif label.lower() == 's':
-                # Показать все записи
                 print(f"\n📋 Записано элементов: {len(session_clicks)}")
                 for c in session_clicks:
-                    print(f"  • {c['label']}: {c['element']['tag']} | {c['element']['text'][:30] if c['element']['text'] else '-'}")
+                    t = c['element']['text'] or '-'
+                    print(f"  • {c['label']}: {c['element']['tag']} | {t[:30]}")
                 continue
             elif label == '':
                 print("⏭️ Пропущено")
@@ -210,8 +220,9 @@ async def click_recorder():
         print(f"{'='*60}")
         for c in session_clicks:
             print(f"  • {c['label']}")
+            cls = c['clickable']['className'] or '-'
             print(f"    Tag: {c['clickable']['tag']}")
-            print(f"    Class: {c['clickable']['className'][:50] if c['clickable']['className'] else '-'}")
+            print(f"    Class: {cls[:50]}")
             print()
         
         print(f"💾 Сохранено в {log_path}")
