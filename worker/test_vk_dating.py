@@ -40,7 +40,6 @@ class VKDatingTester:
                 # Ищем iframe с VK Dating app
                 for i in range(iframes):
                     iframe = self.page.frame_locator(f'iframe >> nth={i}')
-                    # Проверяем есть ли там кнопка лайка
                     try:
                         btn = iframe.locator('[aria-label="like"]')
                         if await btn.count() > 0:
@@ -49,7 +48,6 @@ class VKDatingTester:
                             return True
                     except:
                         pass
-                # Если не нашли по aria-label, берём первый
                 self.frame = self.page.frame_locator('iframe').first
                 print(f"📦 Используем первый iframe ({iframes} шт)")
                 return True
@@ -70,37 +68,59 @@ class VKDatingTester:
         """Парсит информацию о текущем профиле"""
         info = {}
         
+        # Слова которые НЕ являются именами
+        skip_words = ['личное', 'анкеты', 'лайки', 'чаты', 'профиль', 'настройки', 'фильтры']
+        
         try:
-            # Пробуем разные селекторы для имени
+            # Приоритет селекторов: Title класс обычно содержит "Имя, возраст"
             selectors_name = [
-                S.PROFILE_NAME,  # .j2wk1ydI
+                '[class*="Title"]',  # Приоритет - обычно содержит "45 км Светлана, 36"
+                S.PROFILE_NAME,
                 'h2',
-                '[class*="Title"]',
-                '[class*="name"]',
             ]
             
             for sel in selectors_name:
                 try:
                     name_el = self.get_locator(sel)
                     count = await name_el.count()
-                    if count > 0:
-                        name_text = await name_el.first.inner_text()
-                        if name_text and len(name_text) > 1:
-                            match = re.search(r'([А-Яа-яЁёA-Za-z]+),?\s*(\d{2})?', name_text)
+                    
+                    # Перебираем все найденные элементы
+                    for i in range(min(count, 10)):
+                        try:
+                            text = await name_el.nth(i).inner_text()
+                            if not text or len(text) < 2:
+                                continue
+                            
+                            # Пропускаем служебные слова
+                            if text.lower().strip() in skip_words:
+                                continue
+                            
+                            # Ищем паттерн: "расстояние Имя, возраст" или "Имя, возраст"
+                            # Примеры: "45 км Светлана, 36" или "Анна, 28"
+                            match = re.search(r'(?:\d+\s*км\s+)?([А-ЯЁA-Z][а-яёa-z]+),?\s*(\d{2})', text)
                             if match:
                                 info['name'] = match.group(1)
-                                info['age'] = match.group(2) if match.group(2) else '?'
+                                info['age'] = match.group(2)
+                                info['raw'] = text.strip()
                                 break
+                        except:
+                            pass
+                    
+                    if info.get('name'):
+                        break
                 except:
                     pass
             
             # Био
-            bio_el = self.get_locator(S.PROFILE_BIO)
-            if await bio_el.count() > 0:
-                info['bio'] = await bio_el.first.inner_text()
+            try:
+                bio_el = self.get_locator(S.PROFILE_BIO)
+                if await bio_el.count() > 0:
+                    info['bio'] = await bio_el.first.inner_text()
+            except:
+                pass
                 
         except Exception as e:
-            pass  # Тихо игнорируем
+            pass
         
         return info
     
@@ -119,27 +139,31 @@ class VKDatingTester:
     async def action_superlike(self):
         """Ставит суперлайк через кнопку"""
         try:
-            # Пробуем разные селекторы
+            # Пробуем разные селекторы для суперлайка
             selectors = [
-                S.BTN_SUPERLIKE,
                 '[aria-label="super-like"]',
                 '[data-reaction="super-like"]',
-                'button:has([class*="fire"])',
+                S.BTN_SUPERLIKE,
+                'button[class*="super"]',
+                '[class*="SuperLike"]',
             ]
             
             for sel in selectors:
-                btn = self.get_locator(sel)
-                if await btn.count() > 0:
-                    await btn.click()
-                    await asyncio.sleep(0.5)
-                    # Подтверждение
-                    confirm = self.get_locator(S.BTN_SEND_SUPERLIKE)
-                    if await confirm.count() > 0:
-                        await confirm.click()
-                    print("🔥 Суперлайк!")
-                    return
+                try:
+                    btn = self.get_locator(sel)
+                    if await btn.count() > 0:
+                        await btn.first.click()
+                        await asyncio.sleep(0.5)
+                        # Подтверждение
+                        confirm = self.get_locator(S.BTN_SEND_SUPERLIKE)
+                        if await confirm.count() > 0:
+                            await confirm.click()
+                        print("🔥 Суперлайк!")
+                        return
+                except:
+                    pass
             
-            print("⚠️ Кнопка суперлайка не найдена")
+            print("⚠️ Кнопка суперлайка не найдена (возможно нужна подписка)")
         except Exception as e:
             print(f"⚠️ Ошибка суперлайка: {e}")
         await asyncio.sleep(0.8)
@@ -167,12 +191,10 @@ class VKDatingTester:
         ru_name = tab_names_ru[tab_name]
         
         try:
-            # Пробуем через iframe
             selectors = [
                 f'span:has-text("{ru_name}")',
                 f'text="{ru_name}"',
                 f'[class*="TabsItem"]:has-text("{ru_name}")',
-                f'div:has-text("{ru_name}")',
             ]
             
             for sel in selectors:
@@ -233,19 +255,17 @@ class VKDatingTester:
         """Выводит отладочную информацию о DOM"""
         print("\n🔍 DEBUG DOM:")
         
-        # Проверяем iframe
         iframes = await self.page.locator('iframe').count()
         print(f"   Iframes: {iframes}")
         
         if self.frame:
-            # Проверяем ключевые элементы
             checks = [
                 ('[aria-label="like"]', 'Кнопка лайк'),
                 ('[aria-label="dislike"]', 'Кнопка дизлайк'),
                 ('[aria-label="super-like"]', 'Кнопка суперлайк'),
+                ('[class*="SuperLike"]', 'SuperLike класс'),
                 ('span:has-text("Анкеты")', 'Вкладка Анкеты'),
                 ('span:has-text("Чаты")', 'Вкладка Чаты'),
-                ('h2', 'Заголовок h2'),
                 ('[class*="Title"]', 'Title класс'),
             ]
             
@@ -257,13 +277,13 @@ class VKDatingTester:
                     if count > 0:
                         try:
                             text = await el.first.inner_text()
-                            text = text[:30].replace('\n', ' ')
+                            text = text[:40].replace('\n', ' ')
                         except:
                             pass
                     status = "✅" if count > 0 else "❌"
                     print(f"   {status} {name}: {count} шт {f'({text})' if text else ''}")
                 except Exception as e:
-                    print(f"   ❌ {name}: ошибка - {e}")
+                    print(f"   ❌ {name}: ошибка")
 
 
 async def test_vk_dating():
@@ -297,7 +317,6 @@ async def test_vk_dating():
         
         page = await context.new_page()
         
-        # Применяем stealth
         if HAS_STEALTH:
             await stealth_async(page)
             print("🛡️ Stealth режим активирован")
@@ -312,7 +331,6 @@ async def test_vk_dating():
         print("📱 Открываем vk.com/dating...")
         await page.goto("https://vk.com/dating", wait_until="domcontentloaded", timeout=60000)
         
-        # Ждём загрузки iframe
         print("⏳ Ждём загрузки...")
         await asyncio.sleep(3)
         
@@ -345,12 +363,14 @@ async def test_vk_dating():
                 
             elif cmd in ['l', 'ю', '.']:
                 await tester.action_like()
+                await asyncio.sleep(0.3)
                 info = await tester.get_profile_info()
                 if info.get('name'):
                     print(f"👤 Новая: {info.get('name')}, {info.get('age', '?')}")
                     
             elif cmd in ['d', 'б', ',']:
                 await tester.action_dislike()
+                await asyncio.sleep(0.3)
                 info = await tester.get_profile_info()
                 if info.get('name'):
                     print(f"👤 Новая: {info.get('name')}, {info.get('age', '?')}")
@@ -368,7 +388,9 @@ async def test_vk_dating():
                 info = await tester.get_profile_info()
                 if info and info.get('name'):
                     print(f"👤 {info.get('name')}, {info.get('age', '?')}")
-                    if 'bio' in info:
+                    if info.get('raw'):
+                        print(f"   📍 {info.get('raw')}")
+                    if info.get('bio'):
                         print(f"   📝 {info['bio']}")
                 else:
                     print("Профиль не найден (введи x для debug)")
